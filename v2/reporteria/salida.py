@@ -8,9 +8,11 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 NAVY = "1F3864"
-COLS_CARTERA = ["Pos_ID", "ID_Fund", "Fondo", "PK2", "BalanceSheet", "Name_Instrumento", "ISIN", "Risk_Currency",
-                "Investment_Type_Code", "Issue_Type_Code", "Bucket", "Tratamiento", "Regla_ID",
-                "Yield", "Duration", "Fuente", "Etapa", "Estado", "Estado_DEF", "Motivo", "TotalMVal", "MVBook", "AI"]
+COLS_CARTERA = ["Pos_ID", "ID_Fund", "Fondo", "PK2", "BalanceSheet", "Name_Instrumento", "ISIN", "Risk_Country",
+                "Risk_Currency", "Moneda_PK2", "Investment_Type_Code", "Issue_Type_Code", "Coupon_Type_Code",
+                "BalSheetKey", "Bucket", "Bucket_Origen", "Bucket_Orden", "Ficha_FI", "FX_Exposure", "Tratamiento",
+                "Yield", "Duration", "Yield_Moneda", "Fuente", "Origen", "Etapa", "Estado", "Estado_DEF", "CalcType",
+                "CalcType_exportable", "Motivo", "TotalMVal", "MVBook", "AI", "LocalPrice", "Qty", "Factor"]
 
 
 def _formatear(ws, pct_cols: set[str]):

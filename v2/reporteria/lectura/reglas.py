@@ -7,16 +7,20 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..config import FONDOS
+from ..config import POLITICAS_HEDGE
 from ..modelo import CRITERIOS, ESTADOS_DEF, TRATAMIENTOS, limpiar_txt, validar_decimal
 
-HOJAS = ("clasificacion", "defaulteados", "overrides_valor", "overrides_atributo", "alertas", "parametros")
-ATRIBUTOS_OVERRIDE = ("Hedge_Currency", "Indice", "Estado_DEF", "Bucket", "Tratamiento")
+HOJAS = ("fondos", "buckets", "clasificacion", "cajas", "defaulteados", "overrides_valor", "overrides_atributo",
+         "alertas", "parametros")
+FIELDS_OVERRIDE = ("Hedge_Currency", "Indice", "Bucket", "Risk_Currency", "Risk_Country")
 
 
 @dataclass(frozen=True)
 class Reglas:
+    fondos: pd.DataFrame
+    buckets: pd.DataFrame
     clasificacion: pd.DataFrame
+    cajas: pd.DataFrame
     defaulteados: pd.DataFrame
     overrides_valor: pd.DataFrame
     overrides_atributo: pd.DataFrame
@@ -24,34 +28,61 @@ class Reglas:
     parametros: dict
 
 
-def _id_fund(df: pd.DataFrame, hoja: str) -> pd.Series:
+def _cols(df: pd.DataFrame, hoja: str, req: tuple[str, ...]) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    if faltan := [c for c in req if c not in df.columns]:
+        raise ValueError(f"REGLAS/{hoja} sin columnas {faltan}")
+    return df
+
+
+def _id_fund(df: pd.DataFrame, hoja: str, validos: set[int] | None) -> pd.Series:
     ids = pd.to_numeric(df["ID_Fund"], errors="coerce") if "ID_Fund" in df.columns else pd.Series(float("nan"), index=df.index)
-    malos = ids.dropna()[~ids.dropna().isin(list(FONDOS))]
-    if len(malos):
-        raise ValueError(f"REGLAS/{hoja}: ID_Fund desconocido {sorted(set(malos.astype(int)))}; válidos {sorted(FONDOS)}")
+    if validos is not None:
+        malos = ids.dropna()[~ids.dropna().isin(list(validos))]
+        if len(malos):
+            raise ValueError(f"REGLAS/{hoja}: ID_Fund desconocido {sorted(set(malos.astype(int)))} (no está en BD_FUNDS ni en el CUBO)")
     return ids
 
 
-def _enum(df: pd.DataFrame, col: str, valores: tuple, hoja: str, permitir_vacio=False) -> pd.Series:
+def _enum(df: pd.DataFrame, col: str, valores: tuple, hoja: str) -> pd.Series:
     s = limpiar_txt(df[col]).str.upper()
-    malos = sorted(set(s[~s.isin(valores) & ~(permitir_vacio & s.eq(""))]))
-    if malos:
+    if malos := sorted(set(s) - set(valores)):
         raise ValueError(f"REGLAS/{hoja}: {col} inválido {malos}; válidos {list(valores)}")
     return s
 
 
-def _clasificacion(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    req = ["ID", "Criterio", "Valor", "Bucket", "Tratamiento", "Yield", "Duration"]
-    if faltan := [c for c in req if c not in df.columns]:
-        raise ValueError(f"REGLAS/clasificacion sin columnas {faltan}")
+def _fechas(df: pd.DataFrame) -> pd.DataFrame:
+    for c in ("Fecha_Desde", "Fecha_Fin"):
+        df[c] = pd.to_datetime(df[c], errors="coerce") if c in df.columns else pd.NaT
+    return df
+
+
+def _fondos(df, validos):
+    df = _cols(df, "fondos", ("ID_Fund", "Politica_Hedge"))
+    df = df[pd.to_numeric(df["ID_Fund"], errors="coerce").notna()]
+    df["ID_Fund"] = _id_fund(df, "fondos", validos).astype(int)
+    df["Politica_Hedge"] = _enum(df, "Politica_Hedge", POLITICAS_HEDGE, "fondos")
+    return df.drop_duplicates("ID_Fund").reset_index(drop=True)
+
+
+def _buckets(df):
+    df = _cols(df, "buckets", ("Bucket", "Tratamiento"))
+    df["Bucket"] = limpiar_txt(df["Bucket"])
+    df = df[df["Bucket"].ne("")]
+    df["Tratamiento"] = _enum(df, "Tratamiento", TRATAMIENTOS, "buckets")
+    df["Orden"] = pd.to_numeric(df["Orden"], errors="coerce") if "Orden" in df.columns else range(1, len(df) + 1)
+    return df.drop_duplicates("Bucket").reset_index(drop=True)
+
+
+def _clasificacion(df, validos, buckets_validos):
+    df = _cols(df, "clasificacion", ("ID", "Criterio", "Valor", "Bucket"))
     df = df[limpiar_txt(df["Criterio"]).ne("")]
     df["ID"] = pd.to_numeric(df["ID"], errors="coerce")
     if df["ID"].isna().any() or df["ID"].duplicated().any():
         raise ValueError("REGLAS/clasificacion: la columna ID debe ser numérica y única")
     df["ID"] = df["ID"].astype(int)
-    df["ID_Fund"] = _id_fund(df, "clasificacion")
+    df["ID_Fund"] = _id_fund(df, "clasificacion", validos)
     df["Criterio"] = limpiar_txt(df["Criterio"])
     if malos := sorted(set(df["Criterio"]) - set(CRITERIOS)):
         raise ValueError(f"REGLAS/clasificacion: Criterio inválido {malos}; válidos {list(CRITERIOS)}")
@@ -61,72 +92,76 @@ def _clasificacion(df: pd.DataFrame) -> pd.DataFrame:
             re.compile(v)
         except re.error as e:
             raise ValueError(f"REGLAS/clasificacion: regex inválida '{v}': {e}") from e
-    df["Bucket"] = limpiar_txt(df["Bucket"]).str.upper()
-    df["Tratamiento"] = _enum(df, "Tratamiento", TRATAMIENTOS, "clasificacion")
-    validar_decimal(df, "Yield")
-    df["Yield"] = pd.to_numeric(df["Yield"], errors="coerce")
-    df["Duration"] = pd.to_numeric(df["Duration"], errors="coerce")
+    df["Bucket"] = limpiar_txt(df["Bucket"])
+    if malos := sorted(set(df["Bucket"]) - buckets_validos - {""}):
+        raise ValueError(f"REGLAS/clasificacion: Bucket {malos} no existe en la hoja buckets")
+    df["Tratamiento"] = limpiar_txt(df["Tratamiento"]).str.upper() if "Tratamiento" in df.columns else ""
+    if malos := sorted(set(df["Tratamiento"]) - set(TRATAMIENTOS) - {""}):
+        raise ValueError(f"REGLAS/clasificacion: Tratamiento inválido {malos}; válidos {list(TRATAMIENTOS)}")
+    if (df["Bucket"].eq("") & df["Tratamiento"].eq("")).any():
+        raise ValueError("REGLAS/clasificacion: cada regla debe fijar Bucket, Tratamiento o ambos")
     df["Comentario"] = limpiar_txt(df["Comentario"]) if "Comentario" in df.columns else ""
     return df.reset_index(drop=True)
 
 
-def _defaulteados(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    if faltan := [c for c in ("PK2", "Estado") if c not in df.columns]:
-        raise ValueError(f"REGLAS/defaulteados sin columnas {faltan}")
+def _cajas(df, validos):
+    df = _cols(df, "cajas", ("PK2", "Indice_Referencia", "Spread_Anual", "Dias"))
     df["PK2"] = limpiar_txt(df["PK2"])
     df = df[df["PK2"].ne("")]
-    df["ID_Fund"] = _id_fund(df, "defaulteados")
-    df["Estado"] = _enum(df, "Estado", ESTADOS_DEF, "defaulteados")
+    df["ID_Fund"] = _id_fund(df, "cajas", validos)
+    df["Indice_Referencia"] = limpiar_txt(df["Indice_Referencia"])
+    df["Spread_Anual"] = pd.to_numeric(df["Spread_Anual"], errors="coerce")
+    if (df["Spread_Anual"].abs() > 1).any():
+        raise ValueError("REGLAS/cajas: Spread_Anual debe ser decimal (0.0429 = 4,29 %); hay valores > 1")
+    df["Dias"] = pd.to_numeric(df["Dias"], errors="coerce")
     return df.reset_index(drop=True)
 
 
-def _overrides_valor(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    if faltan := [c for c in ("PK2", "Yield", "Duration") if c not in df.columns]:
-        raise ValueError(f"REGLAS/overrides_valor sin columnas {faltan}")
-    df["PK2"] = limpiar_txt(df["PK2"])
-    df = df[df["PK2"].ne("")]
-    df["ID_Fund"] = _id_fund(df, "overrides_valor")
+def _defaulteados(df, validos):
+    df = _cols(df, "defaulteados", ("ID_Instrumento", "Estado"))
+    df = df[pd.to_numeric(df["ID_Instrumento"], errors="coerce").notna()].copy()
+    df["ID_Instrumento"] = pd.to_numeric(df["ID_Instrumento"]).astype(int)
+    df["ID_Fund"] = _id_fund(df, "defaulteados", validos)
+    df["Estado"] = _enum(df, "Estado", ESTADOS_DEF, "defaulteados")
+    return _fechas(df).reset_index(drop=True)
+
+
+def _overrides_valor(df, validos):
+    df = _cols(df, "overrides_valor", ("ID_Instrumento", "SubID_Instrumento", "Yield", "Duration"))
+    df = df[pd.to_numeric(df["ID_Instrumento"], errors="coerce").notna()].copy()
+    df["ID_Instrumento"] = pd.to_numeric(df["ID_Instrumento"]).astype(int)
+    df["SubID_Instrumento"] = pd.to_numeric(df["SubID_Instrumento"], errors="coerce")
+    df["ID_Fund"] = _id_fund(df, "overrides_valor", validos)
     validar_decimal(df, "Yield")
     df["Yield"] = pd.to_numeric(df["Yield"], errors="coerce")
     df["Duration"] = pd.to_numeric(df["Duration"], errors="coerce")
-    for c in ("Vigente_Desde", "Vigente_Hasta"):
-        df[c] = pd.to_datetime(df[c], errors="coerce") if c in df.columns else pd.NaT
-    return df.reset_index(drop=True)
+    return _fechas(df).reset_index(drop=True)
 
 
-def _overrides_atributo(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    if faltan := [c for c in ("PK2", "Atributo", "Valor") if c not in df.columns]:
-        raise ValueError(f"REGLAS/overrides_atributo sin columnas {faltan}")
-    df["PK2"] = limpiar_txt(df["PK2"])
-    df = df[df["PK2"].ne("")]
-    df["ID_Fund"] = _id_fund(df, "overrides_atributo")
-    df["Atributo"] = limpiar_txt(df["Atributo"])
-    if malos := sorted(set(df["Atributo"]) - set(ATRIBUTOS_OVERRIDE)):
-        raise ValueError(f"REGLAS/overrides_atributo: Atributo inválido {malos}; válidos {list(ATRIBUTOS_OVERRIDE)}")
-    df["Valor"] = limpiar_txt(df["Valor"])
-    return df.reset_index(drop=True)
+def _overrides_atributo(df, validos):
+    df = _cols(df, "overrides_atributo", ("ID_Instrumento", "SubID_Instrumento", "Field", "Value"))
+    df = df[pd.to_numeric(df["ID_Instrumento"], errors="coerce").notna()].copy()
+    df["ID_Instrumento"] = pd.to_numeric(df["ID_Instrumento"]).astype(int)
+    df["SubID_Instrumento"] = pd.to_numeric(df["SubID_Instrumento"], errors="coerce")
+    df["ID_Fund"] = _id_fund(df, "overrides_atributo", validos)
+    df["Field"] = limpiar_txt(df["Field"])
+    if malos := sorted(set(df["Field"]) - set(FIELDS_OVERRIDE)):
+        raise ValueError(f"REGLAS/overrides_atributo: Field inválido {malos}; válidos {list(FIELDS_OVERRIDE)}")
+    df["Value"] = limpiar_txt(df["Value"])
+    return _fechas(df).reset_index(drop=True)
 
 
-def _alertas(df: pd.DataFrame) -> pd.DataFrame:
+def _alertas(df, validos):
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
     if "Nombre" in df.columns:
-        df = df[limpiar_txt(df["Nombre"]).ne("")]
-        df["ID_Fund"] = _id_fund(df, "alertas")
+        df = df[limpiar_txt(df["Nombre"]).ne("")].copy()
+        df["ID_Fund"] = _id_fund(df, "alertas", validos)
     return df.reset_index(drop=True)
 
 
-def _parametros(df: pd.DataFrame) -> dict:
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    if faltan := [c for c in ("Clave", "Valor") if c not in df.columns]:
-        raise ValueError(f"REGLAS/parametros sin columnas {faltan}")
+def _parametros(df) -> dict:
+    df = _cols(df, "parametros", ("Clave", "Valor"))
     out = {}
     for _, r in df.iterrows():
         k = str(r["Clave"]).strip()
@@ -137,11 +172,15 @@ def _parametros(df: pd.DataFrame) -> dict:
     return out
 
 
-def leer_reglas(path: Path) -> Reglas:
+def leer_reglas(path: Path, fondos_validos: set[int] | None = None) -> Reglas:
     xl = pd.ExcelFile(path)
     if faltan := [h for h in HOJAS if h not in xl.sheet_names]:
         raise ValueError(f"REGLAS.xlsx sin hojas {faltan}; debe tener {list(HOJAS)}")
     h = {n: xl.parse(n) for n in HOJAS}
-    return Reglas(_clasificacion(h["clasificacion"]), _defaulteados(h["defaulteados"]),
-                  _overrides_valor(h["overrides_valor"]), _overrides_atributo(h["overrides_atributo"]),
-                  _alertas(h["alertas"]), _parametros(h["parametros"]))
+    buckets = _buckets(h["buckets"])
+    return Reglas(_fondos(h["fondos"], fondos_validos), buckets,
+                  _clasificacion(h["clasificacion"], fondos_validos, set(buckets["Bucket"])),
+                  _cajas(h["cajas"], fondos_validos), _defaulteados(h["defaulteados"], fondos_validos),
+                  _overrides_valor(h["overrides_valor"], fondos_validos),
+                  _overrides_atributo(h["overrides_atributo"], fondos_validos),
+                  _alertas(h["alertas"], fondos_validos), _parametros(h["parametros"]))

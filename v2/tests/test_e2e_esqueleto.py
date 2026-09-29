@@ -1,62 +1,78 @@
-"""Walking skeleton: una corrida completa sobre 14 posiciones reales del CUBO.
+"""Corrida completa sobre la muestra real del CUBO (1.000 posiciones, 14 fondos).
 
-Los estados esperados se actualizan a medida que entran fuentes:
-H0 → sin fuentes de proveedor: lo que va a la cascada queda FALTANTE.
+Los estados de lo que va a la cascada cambian cuando entran las fuentes de proveedor (H2/H3).
 """
 import pandas as pd
 
 from reporteria.pipeline import Opciones, correr
 
-ESTADO_ESPERADO = {
-    ("1213-39", 11, "Asset"): ("RESUELTO", "CAJA", "REGLA_FIJA"),
-    ("223985-39", 20, "Asset"): ("RESUELTO", "CAJA", "REGLA_FIJA"),           # DAP: regla del fondo pisa la global
-    ("200810-39", 20, "Liability"): ("RESUELTO", "CUENTAS_POR_PAGAR_COBRAR", "CERO"),
-    ("221752-10000", 20, "Asset"): ("RESUELTO", "DERIVADOS", "CERO"),
-    ("189776-39", 20, "Asset"): ("RESUELTO", "EQUITY", "CERO"),
-    ("87871-39", 20, "Asset"): ("RESUELTO", "FONDOS_MUTUOS", "REGLA_FIJA"),   # sin valor → yield 0 + alerta
-    ("223332-39", 20, "Asset"): ("RESUELTO", "PACTOS_SIMULTANEAS", "REGLA_FIJA"),
-    ("227718-39", 20, "Asset"): ("RESUELTO", "FACTURAS", "FACTURA"),
-    ("527-1", 20, "Asset"): ("FALTANTE", "RENTA_FIJA", ""),                   # EXCEPCIONES llega en H2
-    ("176142-38", 20, "Asset"): ("EXCLUIDO", "EQUITY", "EXCLUIR"),
-    ("176139-1", 20, "Asset"): ("FALTANTE", "RENTA_FIJA", ""),                # JPM llega en H2
-    ("46507-39", 20, "Asset"): ("FALTANTE", "RENTA_FIJA", ""),                # RA llega en H2
-    ("928-1", 20, "Asset"): ("RESUELTO", "RENTA_FIJA", "REGLA_DEF"),
-    ("176727-1", 16, "Liability"): ("FALTANTE", "BANK_DEBT", ""),
-}
+
+def _fila(pos, pk2, fondo, bs="Asset"):
+    f = pos[(pos["PK2"] == pk2) & (pos["ID_Fund"] == fondo) & (pos["BalanceSheet"] == bs)]
+    assert len(f) == 1, (pk2, fondo, bs, len(f))
+    return f.iloc[0]
 
 
-def test_correr_minimo(rutas):
-    res = correr(rutas, Opciones(sin_bbg=True, sin_sql=True))
-    pos = res.posiciones.set_index(["PK2", "ID_Fund", "BalanceSheet"])
-
-    assert len(pos) == 14
+def test_corrida_muestra(rutas, bbg):
+    res = correr(rutas, Opciones(sin_bbg=True, sin_sql=True, bbg=bbg))
+    pos, al = res.posiciones, res.alertas
     cubo = pd.read_excel(rutas.cubo)
+
+    # Invariantes: nada se pierde, nada se duplica, los MV cierran por fondo y lado del balance
+    assert len(pos) == cubo.drop_duplicates(["ID_Fund", "PK2", "BalanceSheet"]).shape[0]
     for (fid, bs), mv in cubo.groupby(["ID_Fund", "BalanceSheet"])["TotalMVal"].sum().items():
-        assert abs(pos.xs((fid, bs), level=("ID_Fund", "BalanceSheet"))["TotalMVal"].sum() - mv) < 1e-6
+        assert abs(pos[(pos["ID_Fund"] == fid) & (pos["BalanceSheet"] == bs)]["TotalMVal"].sum() - mv) < 1e-4
+    assert pos["Bucket"].ne("").all() and pos["Tratamiento"].ne("").all()
+    assert set(pos["Estado"]) <= {"RESUELTO", "FALTANTE", "EXCLUIDO"}
+    ok = pos[pos["Estado"] == "RESUELTO"]
+    assert ok["Yield"].notna().all() and ok["Duration"].notna().all() and ok["Yield"].between(-0.5, 1).all()
 
-    for llave, (estado, bucket, etapa) in ESTADO_ESPERADO.items():
-        fila = pos.loc[llave]
-        assert fila["Estado"] == estado, (llave, fila["Estado"], fila["Motivo"])
-        assert fila["Bucket"] == bucket, (llave, fila["Bucket"])
-        assert fila["Etapa"] == etapa, (llave, fila["Etapa"])
+    # Clasificación por BD_BalanceSheet + reglas por fondo
+    assert set(pos["Bucket"]) - {"SIN_REGLA"} <= {"Fixed Income", "Equity", "Cash, Mutual Funds & Others", "Financial Debt",
+                                                  "Payable", "Receivable"}
+    assert _fila(pos, "223985-39", 20)["Bucket"] == "Cash, Mutual Funds & Others"        # DAP en MRCLP: regla del fondo
+    assert _fila(pos, "223985-39", 20)["Bucket_Origen"].startswith("REGLA")
+    assert _fila(pos, "176142-38", 20)["Bucket"] == "Equity"                             # FIP por PK2
+    assert _fila(pos, "200810-39", 20, "Liability")["Bucket"] == "Payable"
+    assert _fila(pos, "176727-1", 16, "Liability")["Bucket"] == "Financial Debt"
+    assert (pos["Ficha_FI"] != "").sum() > 600
+    mrclp = pos[(pos["ID_Fund"] == 20) & (pos["Bucket"] != "SIN_REGLA")]
+    assert (mrclp["FX_Exposure"] != "").all()                                              # MRCLP tiene tabla FX
+    assert (pos.loc[pos["ID_Fund"] == 13, "FX_Exposure"] == "").all()                      # MDLAT no
 
-    resueltas = pos[pos["Estado"] == "RESUELTO"]
-    assert resueltas["Yield"].notna().all() and resueltas["Duration"].notna().all()
-    assert resueltas["Yield"].between(-0.5, 1.0).all()          # decimal, nunca %
-    assert pos.loc[("928-1", 20, "Asset"), ["Yield", "Duration"]].tolist() == [0.0, 0.5]
-    assert abs(pos.loc[("227718-39", 20, "Asset"), "Yield"] - 0.096) < 1e-9
-    assert abs(pos.loc[("227718-39", 20, "Asset"), "Duration"] - 45 / 365) < 1e-9
+    # PK2 malformado del CUBO real ('46023', sin id_CURR): queda visible, no se pierde
+    raro = pos[pos["PK2"] == "46023"].iloc[0]
+    assert raro["Bucket"] == "SIN_REGLA" and (al["Nombre"] == "SIN_MAESTRO").any()
 
-    nombres = set(res.alertas["Nombre"])
-    assert "REGLA_SIN_VALOR" in nombres and "FALTANTE" in nombres
-    sin_valor = res.alertas[res.alertas["Nombre"] == "REGLA_SIN_VALOR"]
-    assert set(sin_valor["PK2"]) == {"87871-39", "223332-39"}
+    # Defaults corporativos vigentes al settle → DEF en todos los fondos
+    defs = pos[pos["Etapa"] == "REGLA_DEF"]
+    assert len(defs) == 23 and (defs["Yield"] == 0).all() and (defs["Duration"] == 0.5).all()
+    assert (defs["CalcType"] == "DEF").all()
 
-    # Cada Fuente elegida existe como candidato válido
+    # Cajas: índice + spread + días (Template_Cajas migrado a REGLAS/cajas)
+    con_indice = res.candidatos[(res.candidatos["Fuente"] == "CAJA") & res.candidatos["Detalle"].str.contains("Index")]
+    assert len(con_indice) >= 1
+    c = con_indice.iloc[0]
+    assert "nivel=" in c["Detalle"] and abs(c["Duration"] - 1 / 365) < 1e-9
+    sin_regla = al[al["Nombre"] == "CAJA_SIN_REGLA"]
+    assert "87871-39" in set(sin_regla["PK2"])                                           # fondo mutuo CLP sin fila
+    assert _fila(pos, "87871-39", 20)["Estado"] == "RESUELTO" and _fila(pos, "87871-39", 20)["Yield"] == 0
+
+    # Facturas (RPT de Facts): 302 en MRCLP; una pagada queda fuera, una con monto distinto alerta
+    fac = pos[pos["Tratamiento"] == "FACTURA"]
+    assert len(fac) == 302
+    assert (fac["Estado"] == "RESUELTO").sum() == 301 and (fac["Estado"] == "FALTANTE").sum() == 1
+    f_ok = fac[fac["Estado"] == "RESUELTO"]
+    assert f_ok["Yield"].between(0.096 - 1e-9, 0.12 + 1e-9).all()
+    assert (al["Nombre"] == "FACTURA_MONTO_DISTINTO").sum() == 1
+    assert (fac["Duration"].dropna().max() - 120 / 365) < 1e-9
+
+    # Cascada sin proveedores todavía: renta fija queda FALTANTE (H2)
+    assert _fila(pos, "176139-1", 20)["Estado"] == "FALTANTE"
+    assert (al["Nombre"] == "FALTANTE").any()
+
+    # Cada fuente elegida existe como candidato válido; Excel escrito
     cand = res.candidatos[res.candidatos["Valido"]]
-    for _, r in resueltas.iterrows():
-        assert ((cand["Pos_ID"] == r["Pos_ID"]) & (cand["Fuente"] == r["Fuente"])).any()
-
-    assert res.excel.exists()
-    hojas = pd.ExcelFile(res.excel).sheet_names
-    assert {"resumen", "cartera_final", "candidatos", "alertas"} <= set(hojas)
+    ganadores = set(zip(ok["Pos_ID"], ok["Fuente"]))
+    assert ganadores <= set(zip(cand["Pos_ID"], cand["Fuente"]))
+    assert {"resumen", "cartera_final", "candidatos", "alertas"} <= set(pd.ExcelFile(res.excel).sheet_names)

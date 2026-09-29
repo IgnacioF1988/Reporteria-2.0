@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,11 +9,12 @@ from pathlib import Path
 import pandas as pd
 
 from . import alertas, cascada, clasificacion, salida, universo
+from .adaptadores.bbg import Bloomberg, CacheBloomberg, FixtureBloomberg
 from .config import Rutas
+from .fuentes.cajas import candidatos_cajas
 from .fuentes.facturas import candidatos_facturas
-from .fuentes.reglas_fijas import candidatos_reglas_fijas
+from .lectura import maestros as M
 from .lectura.cubo import leer_cubo
-from .lectura.maestros import leer_bd_funds, leer_bd_instrumentos
 from .lectura.manuales import leer_facturas
 from .lectura.reglas import leer_reglas
 from .log import configurar_log
@@ -25,6 +25,7 @@ from .salida import COLS_CARTERA
 class Opciones:
     sin_bbg: bool = False
     sin_sql: bool = False
+    bbg: Bloomberg | None = None      # inyectable (tests); si None se arma según sin_bbg
 
 
 @dataclass
@@ -36,12 +37,21 @@ class Resultado:
     excel: Path | None = None
 
 
-def _insumo_opcional(nombre, ruta, lector, log, al):
+def _opcional(nombre, ruta, lector, log, al):
     if ruta is None or not Path(ruta).exists():
-        log.warning("%s: no encontrado — se omite esa fuente", nombre)
+        log.warning("%s: no encontrado — se omite", nombre)
         al.append(alertas.emitir("INSUMO_FALTANTE", "ALTA", detalle=f"{nombre}: {ruta}", ambito="CORRIDA"))
         return None
     return lector(ruta)
+
+
+def _bloomberg(opciones: Opciones, rutas: Rutas) -> Bloomberg:
+    if opciones.bbg is not None:
+        return opciones.bbg
+    if opciones.sin_bbg:
+        return FixtureBloomberg(rutas.cache, rutas.fecha)
+    from .adaptadores.bbg import XbbgBloomberg
+    return CacheBloomberg(XbbgBloomberg(), rutas.cache, rutas.fecha)
 
 
 def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
@@ -52,39 +62,60 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     for nombre, ruta in rutas.obligatorias().items():
         if not Path(ruta).exists():
             raise FileNotFoundError(f"Input obligatorio {nombre} no encontrado: {ruta}")
-
     al: list[pd.DataFrame] = []
-    reglas = leer_reglas(rutas.reglas)
+
     cubo = leer_cubo(rutas.cubo)
-    log.info("CUBO: %d filas, %d fondos", len(cubo), cubo["ID_Fund"].nunique())
-    pos, a = universo.armar_universo(cubo, leer_bd_instrumentos(rutas.bd_instr), leer_bd_funds(rutas.bd_funds))
+    bd_funds = M.leer_bd_funds(rutas.bd_funds)
+    fondos_validos = set(bd_funds["ID_Fund"]) | set(cubo["ID_Fund"])
+    reglas = leer_reglas(rutas.reglas, fondos_validos)
+    log.info("CUBO: %d filas, fondos %s", len(cubo), sorted(cubo["ID_Fund"].unique()))
+    pos, a = universo.armar_universo(cubo, M.leer_bd_instrumentos(rutas.bd_instr), bd_funds, M.leer_bd_monedas(rutas.bd_monedas))
     al.append(a)
-    pos, a = clasificacion.clasificar(pos, reglas.clasificacion)
+
+    fx = {}
+    for p in rutas.fx_exposure:
+        fid = M.fondo_de_fx_exposure(p, bd_funds)
+        if fid is None:
+            al.append(alertas.emitir("FX_EXPOSURE_SIN_FONDO", "INFO", detalle=p.name, ambito="CORRIDA"))
+        else:
+            fx[fid] = M.leer_fx_exposure(p)
+    pos, a = clasificacion.clasificar(pos, M.leer_bd_balance_sheet(rutas.bd_balance), reglas.buckets, reglas.clasificacion, fx)
     al.append(a)
     log.info("clasificación: %s", pos["Tratamiento"].value_counts().to_dict())
 
-    facturas = _insumo_opcional("FACTURAS", rutas.facturas, leer_facturas, log, al)
+    bbg = _bloomberg(opciones, rutas)
     cands = []
-    c, a = candidatos_reglas_fijas(pos); cands.append(c); al.append(a)
-    c, a = candidatos_facturas(pos, facturas, rutas.settle, reglas.parametros.get("factura_tolerancia_monto", 0.01))
+    c, a = candidatos_cajas(pos, reglas.cajas, bbg, rutas.fecha); cands.append(c); al.append(a)
+    rpt = _opcional("FACTURAS", rutas.facturas, leer_facturas, log, al)
+    homol = _opcional("HOMOL_INSTRUMENTOS", rutas.homol, lambda p: M.leer_homol(p, "GENEVA"), log, al)
+    homol_funds = _opcional("HOMOL_FUNDS", rutas.homol_funds, M.leer_homol_funds, log, al)
+    # El RPT puede nombrar al fondo como en HOMOL_FUNDS (MRentaCLP) o como en BD_FUNDS (MRCLP): se aceptan ambos
+    mapa_fondos = {str(k).upper(): int(v) for k, v in zip(bd_funds["FundShortName"], bd_funds["ID_Fund"])}
+    if homol_funds is not None:
+        mapa_fondos.update({str(k).upper(): int(v) for k, v in zip(homol_funds["Portfolio"], homol_funds["ID_Fund"])})
+    c, a = candidatos_facturas(
+        pos, rpt, dict(zip(homol["SourceInvestment"], homol["ID_Instrumento"])) if homol is not None else {},
+        mapa_fondos, rutas.settle, reglas.parametros.get("factura_tolerancia_monto", 0.01))
     cands.append(c); al.append(a)
     cand = pd.concat([x for x in cands if len(x)], ignore_index=True) if any(len(x) for x in cands) else cands[0]
 
-    pos, cand, a = cascada.elegir(pos, cand, reglas.defaulteados)
+    defaulted = _opcional("DEFAULTED", rutas.defaulted, M.leer_defaulted, log, al)
+    pos, cand, a = cascada.elegir(pos, cand, defaulted, reglas.defaulteados, rutas.settle)
     al.append(a)
-    todas = alertas.juntar(*al)
-    resumen = {
-        "fecha": rutas.fecha, "posiciones": len(pos),
-        "estado": pos["Estado"].value_counts().to_dict(),
-        "fuente": pos.loc[pos["Estado"].eq("RESUELTO"), "Fuente"].value_counts().to_dict(),
-        "alertas": {f"{sev}|{nom}": int(n) for (sev, nom), n in todas.groupby(["Severidad", "Nombre"]).size().items()} if len(todas) else {},
-        "segundos": round(time.perf_counter() - t0, 1),
-    }
-    log.info("estado: %s | fuentes: %s", resumen["estado"], resumen["fuente"])
+    yld_flag = M.leer_yld_flag(rutas.bd_yld_flag) if Path(rutas.bd_yld_flag).exists() else {}
+    pos["CalcType_exportable"] = pos["CalcType"].map(yld_flag).fillna(pos["CalcType"])
 
+    todas = alertas.juntar(*al)
+    resumen = {"fecha": rutas.fecha, "posiciones": len(pos), "fondos": sorted(int(x) for x in pos["ID_Fund"].unique()),
+               "estado": pos["Estado"].value_counts().to_dict(),
+               "fuente": pos.loc[pos["Estado"].eq("RESUELTO"), "Fuente"].value_counts().to_dict(),
+               "bucket": pos["Bucket"].value_counts().to_dict(),
+               "alertas": {f"{s}|{n}": int(k) for (s, n), k in todas.groupby(["Severidad", "Nombre"]).size().items()} if len(todas) else {},
+               "segundos": round(time.perf_counter() - t0, 1)}
+    log.info("estado: %s | fuentes: %s", resumen["estado"], resumen["fuente"])
     hojas = {
-        "resumen": pd.DataFrame([(k, json.dumps(v, ensure_ascii=False) if isinstance(v, dict) else v)
-                                 for k, v in resumen.items()], columns=["Concepto", "Valor"]),
+        "resumen": pd.DataFrame([(k, json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v) for k, v in resumen.items()],
+                                columns=["Concepto", "Valor"]),
         "cartera_final": pos[[c for c in COLS_CARTERA if c in pos.columns]],
         "candidatos": cand,
         "alertas": todas.sort_values(["Severidad", "Nombre"]) if len(todas) else todas,

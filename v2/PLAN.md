@@ -13,17 +13,34 @@
 | Ubicación | Carpeta **`v2/`** dentro de este repo (paquete `reporteria`, `tests/`, `pyproject.toml`). Se migra a repo nuevo cuando exista. |
 | Alcance v1 | **Todo el legacy** (EXCEPCIONES, JPM, RA, BBG YAS + XCCY, CSHF, JSONL, DEF, breakeven, drops, overrides, alertas, agregados) **más** caja/FFMM/pactos/simultáneas, facturas, agregados A/P/Patrimonio, overrides por fondo. |
 | Universo | **CUBO completo**: todos los `Investment_Type_Code` (1 RF, 2 Equity, 3 Cash, 4 Pay/Rec, 5 Bank Debt, 6 Fund, 7 Derivative) y ambos `BalanceSheet`. Nada queda fuera en silencio. |
-| Caja, FFMM, pactos, simultáneas | Yield/Duration por **reglas fijas** en REGLAS.xlsx. Caja = 0/0. FFMM, pactos y simultáneas: filas en la plantilla con Yield/Dur **vacías**; mientras estén vacías entran a yield 0 y se levanta alerta `REGLA_SIN_VALOR` con el MV afectado. |
-| Facturas | `FACTURAS_{FECHA}.xlsx` en `01_INPUTS/MERCADO`: `PK2 \| Tasa_Mensual \| Monto \| Fecha_Vencimiento`. Tasa en % mensual (1.2 = 1,2 %). **Yield = Tasa × 12 / 100** (lineal). Duration = días al vencimiento / 365. Monto vs TotalMVal → alerta si difiere. |
+| Caja, FFMM, pactos, simultáneas | Reemplazado en §2b: índice de referencia + spread + días por posición (REGLAS/`cajas`), heredado de `Template_Cajas`. Sin fila → yield 0 + alerta. |
+| Facturas | Reemplazado en §2b: formato RPT de Facts (`tasa_mensual` decimal), cruce por HOMOL. |
 | Parametrización | **Un único `REGLAS.xlsx`** en MANUALES (clasificación, defaulteados, overrides de valor, overrides de atributo, alertas, parámetros). **`ID_Fund` numérico** en todos los manuales nuevos (vacío = todos los fondos); nunca nombres. |
 | Atributos sobreescribibles por fondo | Yield/Duration, **Bucket/Tratamiento** (ej. DAP = RF en MDCH, caja en MRCLP; excluir), **Hedge_Currency**, **Índice** (UF/UDI/UVR/CDI/TIIE/NOMINAL), **Estado DEF/PROPDEF**. |
 | Agregados | AW = Σ(y·MV)/ΣMV y DW = Σ(y·MV·D)/Σ(MV·D) por fondo a nivel **ACTIVOS** (Σ Asset), **PASIVOS** (Σ \|Liability\|) y **PATRIMONIO** (A − P; yield = (A·y_A − P·y_P)/(A − P)). Todo lo sin métrica entra a yield 0 / dur 0. Pasivos conservan su métrica si la tienen. |
-| Taxonomía de buckets | **Pendiente**: el usuario sube archivos con el tratamiento actual; de ahí se fija la lista. Mientras, taxonomía provisional (§4.2). El mecanismo no cambia. |
+| Taxonomía de buckets | Resuelta en §2b: `Investment_Type_CarteraFI` de `BD_BalanceSheet`. |
 | Período anterior | Se **corre el pipeline nuevo sobre 20260731** (inputs ya en el repo) como semilla; agosto compara contra eso. |
 | Operador | CLI Windows: `reporteria check / correr --fecha … [--sin-bbg]`. Salida: un Excel por cierre + log. Python 3.11+, xbbg y pyodbc en su máquina. |
 | Fixtures | El usuario deja en `v2/tests/fixtures/` muestras reales de CUBO, BD_INSTRUMENTOS, BD_FUNDS y HOMOL. Hasta entonces, fixtures reconstruidos desde `UNIVERSO_20260731`, `Cajas_jul.xlsx`, `Otros/Fondos_jul.xlsx`. |
 | Unidades | **Decimal** en todo el código y archivos; % solo como `number_format` en Excel. Validación en lectura y assert final. |
 | Política hedgeados | `XCCY_SI_EXISTE` (parámetro); Yield_Drop siempre se calcula y se compara. |
+
+
+## 2b. Levantamiento de datos (archivos corporativos entregados) — decisiones
+
+**Modelo de datos real.** `BD_INSTRUMENTOS` (maestro, 240 k filas): `PK2 = ID_Instrumento-SubID_Instrumento`, con `SubID = id_CURR` (`BD_Monedas`). Ocho códigos de clasificación con su tabla de descripción (`BD_INVESTMENT_TYPE`, `BD_ISSUER_TYPE`, `BD_ISSUE_TYPE`, `BD_COUPON_TYPE`, `BD_RANK`, `BD_CASH_TYPE`, `BD_BANK_DEBT_TYPE`, `BD_FUND_TYPE`), más `Yield_Type` (`BD_YIELD`: 1 YTM, 2 YTC, 15 YTW, 28 YTA), `Emision_nacional`, `Risk_Country`, `Risk_Currency`. `HOMOL_INSTRUMENTOS` traduce códigos de cada fuente (GENEVA, RISKAMERICA, JPM, DERIVADOS, CASH APPRAISAL…) a `ID_Instrumento`; `HOMOL_FUNDS` traduce nombres de portfolio a `ID_Fund`. `BD_BalanceSheet` concatena `ASSET_TYPE` + los 8 códigos en `BalSheetKey` y devuelve tres clasificaciones: `Investment_Type_CarteraFI` (15 buckets con `OrdenCartera`), `Investment_Type_Ficha_FI` y `Investment_Type_CarteraFI_MRCLP` (solo difiere en depósitos y pagarés soberanos → Cash). `BD_FX_Exposure_MLDL/MRCLP`: taxonomía por fondo para exposición cambiaria. `DEFAULTED` (corporativo): `ID_Instrumento` con vigencia. `EXCEPCIONES` (corporativo): overrides por fondo con vigencia (`ID_Fund, ID_Instrumento, SubID_Instrumento, Field, Value, Fecha_Desde, Fecha_Fin`). `BD_YLD_FLAG`: `CalcType` exportable. `Template_Cajas`: tratamiento actual de caja (índice de referencia + spread anual + días). `muestra_facturas`: RPT de Facts (`tasa_mensual` decimal, `yield = tasa × 12`, vencimiento vigente con prórrogas, nemotécnico `FAC…` → HOMOL/GENEVA).
+
+| Tema | Decisión |
+|---|---|
+| Fondos | **Todos los que traiga el CUBO** del cierre. Alias y moneda base desde `BD_FUNDS`; nada hardcodeado. Política de hedge por fondo en REGLAS/`fondos`. |
+| Clasificación | `BalSheetKey` desde los 8 códigos del maestro → `BD_BalanceSheet` → `Bucket` (= CarteraFI), `Ficha_FI` y, para fondos con tabla, `FX_Exposure`. Reglas por fondo en REGLAS/`clasificacion` (las 5 combinaciones `_MRCLP` migran con ID_Fund=20). Combinación sin mapeo → `SIN_REGLA` + alerta. `Tratamiento` por bucket en REGLAS/`buckets` (editable). |
+| Caja y equivalentes | REGLAS/`cajas`: `ID_Fund, PK2, Indice_Referencia, Spread_Anual (decimal), Dias`. Yield = nivel del índice (BBG `PX_LAST` al settle, cacheable; `N.A.` = 0) + spread; Duration = Dias/365. Posición de bucket caja sin fila → yield 0 + alerta `CAJA_SIN_REGLA`. Migra desde `Template_Cajas`. Aplica también a pasivos Financial Debt / Repo / Collateral. |
+| Facturas | Formato RPT (hoja `Facturas`): cruce `nemotecnico → HOMOL(GENEVA) → ID_Instrumento` y `fondo → HOMOL_FUNDS → ID_Fund`; se excluyen `estado = pagado`. Yield = `tasa_mensual × 12` (ya decimal). Duration = (fecha_vencimiento vigente − settle)/365. Alerta si `monto_compra` ≠ TotalMVal. |
+| Defaults | `DEFAULTED.xlsx` vigente al settle ⇒ DEF en todos los fondos. PROPDEF (y DEF adicional por fondo) en REGLAS/`defaulteados` con vigencia. **El DEFAULTEADOS legacy no se migra.** |
+| Overrides | Esquema corporativo de `EXCEPCIONES.xlsx` para `overrides_atributo` y `overrides_valor`: `ID_Fund (vacío = todos), ID_Instrumento, SubID_Instrumento, Field, Value, Fecha_Desde, Fecha_Fin`. `PricingFactor` NO se aplica (el CUBO ya viene ajustado). |
+| Yield_Type | Define el campo a pedir a BBG (15 → yield to worst, 1 → YTM, 2 → YTC…) y el `CalcType` de salida según `BD_YLD_FLAG` (YTW/YTM/…, DEF, PROP, PROP NP). 0 o vacío → YTW + alerta INFO. |
+| Archivos históricos | `BD_INSTRUMENTOS_EXCEPCIONES_MRCLP`, `TABLA_EXCEPCIONES`, `BD_BalanceSheet_OLD`, `BD_CurrExpo_MLDL` no se usan. |
+| Agregados | Por fondo × {ACTIVOS, PASIVOS, PATRIMONIO} × {TOTAL, Bucket, Ficha_FI, FX_Exposure, Risk_Country, Risk_Currency}. |
 
 ## 3. Arquitectura (`v2/`)
 

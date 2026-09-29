@@ -1,116 +1,124 @@
-"""Construye los fixtures mini a partir de los archivos del repo legacy.
+"""Construye tests/fixtures/mini/ a partir de los maestros corporativos entregados (tests/fixtures/corporativo/).
 
-Se corre UNA vez (los .xlsx resultantes quedan versionados):
-    python tests/fixtures/construir_fixtures.py ../   # ruta al repo Reporteria-2.0
-Cuando el usuario entregue muestras reales de CUBO / BD_INSTRUMENTOS / BD_FUNDS
-se reemplazan por esas y este script queda como documentación del origen.
+    python tests/fixtures/construir_fixtures.py
+
+Recorta BD_INSTRUMENTOS y HOMOL a los instrumentos de la muestra del CUBO (el maestro completo tarda ~30 s en
+leerse), copia las dimensiones chicas tal cual, arma un REGLAS.xlsx inicial (cajas desde Template_Cajas, las
+reclasificaciones MRCLP de BD_BalanceSheet) y sintetiza FACTURAS en el formato del RPT de Facts para las facturas
+que sí están en el CUBO. Los .xlsx de mini/ quedan versionados; este script documenta su origen.
 """
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-LEGACY = Path(sys.argv[1] if len(sys.argv) > 1 else "..").resolve()
-OUT = Path(__file__).parent
+AQUI = Path(__file__).parent
+CORP, MINI = AQUI / "corporativo", AQUI / "mini"
 FECHA = "20260731"
 SETTLE = pd.Timestamp("2026-07-31")
-
-# (PK2, ID_Fund, BalanceSheet) del walking skeleton — cada fila cubre un camino distinto
-POSICIONES = [
-    ("1213-39", 11, "Asset"),        # caja MDCH                      → CAJA FIJO 0/0
-    ("223985-39", 20, "Asset"),      # DAP MRCLP                      → CAJA por regla del fondo (global: DAP CASCADA)
-    ("200810-39", 20, "Liability"),  # payable MRCLP                  → CERO
-    ("221752-10000", 20, "Asset"),   # derivado MRCLP                 → CERO
-    ("189776-39", 20, "Asset"),      # equity MRCLP                   → CERO
-    ("87871-39", 20, "Asset"),       # fondo mutuo CFMBNSMMLA         → FIJO sin valor → yield 0 + alerta
-    ("223332-39", 20, "Asset"),      # simultánea SIM_CREDICORP       → FIJO sin valor (regex gana a Investment_Type 5)
-    ("227718-39", 20, "Asset"),      # factura FACRCGP77804           → FACTURA
-    ("527-1", 20, "Asset"),          # BAUZA LOAN (excepción PM)      → CASCADA (EXCEPCIONES en H2)
-    ("176142-38", 20, "Asset"),      # FIP ALZA RENTAS II             → EXCLUIR por PK2 en fondo 20
-    ("176139-1", 20, "Asset"),       # LTMCI 7.625 2031 (JPM)         → CASCADA (JPM en H2)
-    ("46507-39", 20, "Asset"),       # BTP0281033 (RA)                → CASCADA (RA en H2)
-    ("928-1", 20, "Asset"),          # OCEANO 2015 defaulteado        → REGLA_DEF
-    ("176727-1", 16, "Liability"),   # TPLH LOAN pasivo MLCD          → BANK_DEBT CASCADA (FALTANTE)
-]
+COPIAR = ["BD_FUNDS.xlsx", "BD_BalanceSheet.xlsx", "BD_Monedas.xlsx", "BD_YLD_FLAG.xlsx", "BD_YIELD.xlsx",
+          "DEFAULTED.xlsx", "HOMOL_FUNDS.xlsx", "BD_FX_Exposure_MLDL.xlsx", "BD_FX_Exposure_MRCLP.xlsx",
+          "BD_INVESTMENT_TYPE.xlsx", "BD_ISSUE_TYPE.xlsx", "BD_ISSUER_TYPE.xlsx", "BD_COUPON_TYPE.xlsx",
+          "BD_CASH_TYPE.xlsx", "BD_BANK_DEBT_TYPE.xlsx", "BD_FUND_TYPE.xlsx", "BD_RANK.xlsx"]
 
 
 def main():
-    cubo = pd.read_excel(LEGACY / "Otros/Fondos_jul.xlsx")
-    cubo["PK2"] = cubo["PK2"].astype(str).str.strip()
-    cajas = pd.concat([pd.read_excel(LEGACY / "Cajas_jul.xlsx", sheet_name=s) for s in ("USD", "MLDL", "CLP")])
-    cajas["PK2"] = cajas["PK2"].astype(str).str.strip()
-    uni = pd.concat([pd.read_excel(LEGACY / f"02_OUTPUTS/{FECHA}/UNIVERSO_{FECHA}.xlsx", sheet_name=s)
-                     for s in ("con_ISIN", "sin_ISIN", "defaulteados", "facturas")], ignore_index=True)
-    uni["PK2"] = uni["PK2"].astype(str).str.strip()
+    MINI.mkdir(exist_ok=True)
+    cubo = pd.read_excel(CORP / "CUBO_20260731.xlsx")
+    cubo.to_excel(MINI / f"CUBO_{FECHA}.xlsx", index=False)
+    for f in COPIAR:
+        (MINI / f).write_bytes((CORP / f).read_bytes())
 
-    llaves = pd.DataFrame(POSICIONES, columns=["PK2", "ID_Fund", "BalanceSheet"])
-    mini = llaves.merge(cubo, on=["PK2", "ID_Fund", "BalanceSheet"], how="left")
-    assert mini["TotalMVal"].notna().all(), mini[mini["TotalMVal"].isna()]
-    mini.to_excel(OUT / f"CUBO_{FECHA}.xlsx", index=False)
+    bd = pd.read_excel(CORP / "BD_INSTRUMENTOS.xlsx")
+    bd["PK2"] = bd["ID_Instrumento"].astype(str) + "-" + bd["SubID_Instrumento"].astype(str)
+    ids = set(cubo["ID_Instrumento"])
+    mini_bd = bd[bd["ID_Instrumento"].isin(ids)].drop(columns="PK2")
+    with pd.ExcelWriter(MINI / "BD_INSTRUMENTOS.xlsx") as w:
+        mini_bd.to_excel(w, sheet_name="BD_INSTRUMENTOS", index=False)
 
-    # BD_INSTRUMENTOS: RF desde UNIVERSO, no-RF desde Cajas (Investment_Type_Code, moneda, nombre)
-    rf = uni.drop_duplicates("PK2").set_index("PK2")
-    no_rf = cajas.drop_duplicates("PK2").set_index("PK2")
-    filas = []
-    for pk2 in mini["PK2"].unique():
-        iid, sub = pk2.split("-")
-        if pk2 in rf.index:
-            r = rf.loc[pk2]
-            filas.append(dict(ID_Instrumento=int(iid), SubID_Instrumento=int(sub), Risk_Currency=r["Risk_Currency"],
-                              Investment_Type_Code=1, Issue_Type_Code=r["Issue_Type_Code"],
-                              Name_Instrumento=r["Name_Instrumento"], ISIN=r["ISIN"],
-                              Risk_Country=r["Risk_Country"], CompanyName=r["CompanyName"]))
-        else:
-            r = no_rf.loc[pk2]
-            filas.append(dict(ID_Instrumento=int(iid), SubID_Instrumento=int(sub), Risk_Currency=r["id_CURR_Code"],
-                              Investment_Type_Code=int(r["Investment_Type_Code"]), Issue_Type_Code=None,
-                              Name_Instrumento=r["Name_Instrumento"], ISIN=None, Risk_Country=None, CompanyName=None))
-    with pd.ExcelWriter(OUT / "BD_INSTRUMENTOS.xlsx") as w:
-        pd.DataFrame(filas).to_excel(w, sheet_name="BD_INSTRUMENTOS", index=False)
+    homol = pd.read_excel(CORP / "HOMOL_INSTRUMENTOS.xlsx")
+    homol[homol["ID_Instrumento"].isin(ids)].to_excel(MINI / "HOMOL_INSTRUMENTOS.xlsx", index=False)
 
-    pd.DataFrame({"ID_Fund": [2, 11, 13, 16, 17, 20, 59, 65, 68],
-                  "FundShortName": ["ALTURAS II", "MDCH", "MDLAT", "MLCD", "MLDL", "MRCLP", "MLATHY", "MCIT", "MLCC (Geneva)"],
-                  "FundBaseCurrency": ["USD", "CLP", "USD", "USD", "USD", "CLP", "USD", "USD", "USD"]}
-                 ).to_excel(OUT / "BD_FUNDS.xlsx", index=False)
+    # FACTURAS en formato RPT de Facts, sintetizadas para las facturas de la muestra (MRCLP, fondo 20)
+    fac = cubo.merge(mini_bd[["ID_Instrumento", "Name_Instrumento", "Issue_Type_Code"]], on="ID_Instrumento")
+    fac = fac[(fac["Issue_Type_Code"] == 5) & (fac["ID_Fund"] == 20)].drop_duplicates("PK2").reset_index(drop=True)
+    n = len(fac)
+    rpt = pd.DataFrame({
+        "documento_operacion_id": range(80000, 80000 + n),
+        "nemotecnico": fac["Name_Instrumento"],
+        "fondo": "MRCLP",
+        "tipo": "CC",
+        "estado": ["vigente"] * n,
+        "fecha_inversion": SETTLE - pd.Timedelta(days=20),
+        "moneda": "CLP",
+        "monto_compra": fac["TotalMVal"].round(0),
+        "fecha_vencimiento_original": [SETTLE + pd.Timedelta(days=30 + (i % 60)) for i in range(n)],
+        "fecha_vencimiento": [SETTLE + pd.Timedelta(days=30 + (i % 60)) for i in range(n)],
+        "fecha_pago": pd.NaT,
+        "tasa_mensual": [0.008 + 0.0005 * (i % 5) for i in range(n)],
+        "prorrogas": 0,
+    })
+    rpt["yield"] = rpt["tasa_mensual"] * 12
+    if n >= 3:
+        rpt.loc[0, "estado"], rpt.loc[0, "fecha_pago"] = "pagado", SETTLE - pd.Timedelta(days=3)   # no debe usarse
+        rpt.loc[1, "monto_compra"] = rpt.loc[1, "monto_compra"] * 1.05                             # alerta monto
+        rpt.loc[2, ["prorrogas", "fecha_vencimiento"]] = [1, SETTLE + pd.Timedelta(days=120)]      # prórroga
+    rpt.to_excel(MINI / f"FACTURAS_{FECHA}.xlsx", sheet_name="Facturas", index=False)
 
-    # FACTURAS (formato nuevo): tasa mensual en %, vencimiento a 45 días, monto igual al MV
-    fac = mini[mini["PK2"] == "227718-39"].iloc[0]
-    pd.DataFrame([{"PK2": "227718-39", "Tasa_Mensual": 0.8, "Monto": round(fac["TotalMVal"], 2),
-                   "Fecha_Vencimiento": SETTLE + pd.Timedelta(days=45)}]
-                 ).to_excel(OUT / f"FACTURAS_{FECHA}.xlsx", index=False)
-
-    # REGLAS.xlsx mini
+    # REGLAS.xlsx inicial
+    tc = pd.concat([pd.read_excel(CORP / "Template_Cajas.xlsx", sheet_name=s) for s in ("Fondos USD", "MLDL")])
+    funds = pd.read_excel(CORP / "BD_FUNDS.xlsx")
+    nombre2id = dict(zip(funds["FundShortName"], funds["ID_Fund"]))
+    tc["ID_Fund"] = tc["FundShortName"].map(nombre2id)
+    cajas = pd.DataFrame({
+        "ID_Fund": tc["ID_Fund"].astype("Int64"), "PK2": tc["PK2"].astype(str).str.strip(),
+        "Indice_Referencia": tc["Indice Referencia"].where(tc["Indice Referencia"].notna(), ""),
+        "Spread_Anual": tc["Spread (Anual)"], "Dias": tc["Fecha_Vencimiento"],
+        "Comentario": "migrado de Template_Cajas " + tc["Name_Instrumento"].astype(str),
+    }).drop_duplicates(["ID_Fund", "PK2"])
+    buckets = pd.DataFrame([
+        ("Fixed Income", "CASCADA", 1), ("Equity", "CERO", 2), ("Cash, Mutual Funds & Others", "CAJA", 3),
+        ("Restricted Cash", "CAJA", 4), ("Restricted Cash (Deriv.)", "CAJA", 5), ("Restricted Cash (REPO)", "CAJA", 6),
+        ("Receivable", "CERO", 7), ("MTM (+)", "CERO", 8), ("Fixed Income Short", "CASCADA", 9), ("Equity Short", "CERO", 10),
+        ("Financial Debt", "CAJA", 11), ("Repo", "CAJA", 12), ("Collateral Payable", "CERO", 13), ("Payable", "CERO", 14),
+        ("MTM (-)", "CERO", 15),
+    ], columns=["Bucket", "Tratamiento", "Orden"])
     clas = pd.DataFrame([
-        # ID, ID_Fund, Criterio, Valor, Bucket, Tratamiento, Yield, Duration, Comentario
-        (1, None, "Investment_Type_Code", "1", "RENTA_FIJA", "CASCADA", None, None, "Renta fija: busca métrica en la cascada"),
-        (2, None, "Investment_Type_Code", "3", "CAJA", "FIJO", 0, 0, "Caja y equivalentes"),
-        (3, None, "Investment_Type_Code", "4", "CUENTAS_POR_PAGAR_COBRAR", "CERO", None, None, ""),
-        (4, None, "Investment_Type_Code", "6", "FONDOS_MUTUOS", "FIJO", None, None, "Completar yield/dur por el operador"),
-        (5, None, "Investment_Type_Code", "7", "DERIVADOS", "CERO", None, None, ""),
-        (6, None, "Investment_Type_Code", "2", "EQUITY", "CERO", None, None, ""),
-        (7, None, "Investment_Type_Code", "5", "BANK_DEBT", "CASCADA", None, None, "Deuda bancaria"),
-        (8, None, "Issue_Type_Code", "5", "FACTURAS", "FACTURA", None, None, "Cruza con FACTURAS_{FECHA}.xlsx"),
-        (9, None, "Nombre_Regex", r"^SIM_", "PACTOS_SIMULTANEAS", "FIJO", None, None, "Simultáneas: completar yield/dur"),
-        (10, None, "Issue_Type_Code", "4", "RENTA_FIJA", "CASCADA", None, None, "DAP: renta fija por defecto"),
-        (11, 20, "Issue_Type_Code", "4", "CAJA", "FIJO", 0, 0, "DAP en MRCLP es caja y equivalentes"),
-        (12, 20, "PK2", "176142-38", "EQUITY", "EXCLUIR", None, None, "FIP ALZA RENTAS II — Treatment Equity"),
-    ], columns=["ID", "ID_Fund", "Criterio", "Valor", "Bucket", "Tratamiento", "Yield", "Duration", "Comentario"])
-    defs = pd.DataFrame([(None, "928-1", "DEF", "OCEANO 11.25 07/15/2015 REGS")],
-                        columns=["ID_Fund", "PK2", "Estado", "Comentario"])
-    ov_val = pd.DataFrame(columns=["ID_Fund", "PK2", "Yield", "Duration", "Moneda", "Fuente", "Comentario",
-                                   "Vigente_Desde", "Vigente_Hasta"])
-    ov_att = pd.DataFrame(columns=["ID_Fund", "PK2", "Atributo", "Valor", "Comentario"])
+        (1, 20, "BalSheetKey", "Asset11412000", "Cash, Mutual Funds & Others", "", "MRCLP: depósito fijo (Issue 4) es caja"),
+        (2, 20, "BalSheetKey", "Asset11432000", "Cash, Mutual Funds & Others", "", "MRCLP: depósito inflation-linked es caja"),
+        (3, 20, "BalSheetKey", "Asset12422000", "Cash, Mutual Funds & Others", "", "MRCLP: depósito soberano flotante es caja"),
+        (4, 20, "BalSheetKey", "Asset12812000", "Cash, Mutual Funds & Others", "", "MRCLP: pagaré soberano fijo es caja"),
+        (5, 20, "BalSheetKey", "Asset12832000", "Cash, Mutual Funds & Others", "", "MRCLP: pagaré soberano inflation-linked es caja"),
+        (6, 20, "PK2", "176142-38", "Equity", "", "FIP ALZA RENTAS COMERCIALES II — Treatment Equity"),
+        (7, None, "Issue_Type_Code", "5", "", "FACTURA", "Facturas: sigue en Fixed Income pero la métrica sale del RPT de Facts"),
+    ], columns=["ID", "ID_Fund", "Criterio", "Valor", "Bucket", "Tratamiento", "Comentario"])
+    fondos = pd.DataFrame([(11, "A_CLP", "MDCH: papel en moneda fuerte se asume swapeado a CLP"),
+                           (20, "A_CLP", "MRCLP: idem"),
+                           (17, "POR_PAIS", "MLDL: swap a la moneda local del Risk_Country")],
+                          columns=["ID_Fund", "Politica_Hedge", "Comentario"])
+    defs = pd.DataFrame(columns=["ID_Fund", "ID_Instrumento", "Estado", "Fecha_Desde", "Fecha_Fin", "Comentario"])
+    ov_val = pd.DataFrame(columns=["ID_Fund", "ID_Instrumento", "SubID_Instrumento", "Yield", "Duration",
+                                   "Fecha_Desde", "Fecha_Fin", "Fuente", "Comentario"])
+    ov_att = pd.DataFrame(columns=["ID_Fund", "ID_Instrumento", "SubID_Instrumento", "Field", "Value",
+                                   "Fecha_Desde", "Fecha_Fin", "Comentario"])
     alertas = pd.DataFrame(columns=["ID", "Nombre", "Campo", "Operador", "Umbral", "Severidad", "ID_Fund",
                                     "Activa", "Requiere_Anterior", "Ambito", "Descripcion"])
     params = pd.DataFrame([("yield_max_proveedor", 1.0, "Yield máxima aceptada de un proveedor (decimal)"),
                            ("yield_min_proveedor", -0.5, "Yield mínima aceptada"),
-                           ("factura_tolerancia_monto", 0.01, "Diferencia relativa Monto vs TotalMVal que dispara alerta")],
+                           ("factura_tolerancia_monto", 0.01, "Diferencia relativa monto_compra vs TotalMVal que alerta"),
+                           ("yield_type_default", 15, "Yield_Type cuando el maestro trae 0 o vacío (15 = YTW)")],
                           columns=["Clave", "Valor", "Descripcion"])
-    with pd.ExcelWriter(OUT / "REGLAS.xlsx") as w:
-        for nombre, df in [("clasificacion", clas), ("defaulteados", defs), ("overrides_valor", ov_val),
-                           ("overrides_atributo", ov_att), ("alertas", alertas), ("parametros", params)]:
+    with pd.ExcelWriter(MINI / "REGLAS.xlsx") as w:
+        for nombre, df in [("fondos", fondos), ("buckets", buckets), ("clasificacion", clas), ("cajas", cajas),
+                           ("defaulteados", defs), ("overrides_valor", ov_val), ("overrides_atributo", ov_att),
+                           ("alertas", alertas), ("parametros", params)]:
             df.to_excel(w, sheet_name=nombre, index=False)
-    print("fixtures listos en", OUT)
+
+    # Caché BBG de fixture: niveles de los índices de referencia de cajas (PX_LAST, en %, como los entrega BBG)
+    bbg = MINI / "bbg_cache"; bbg.mkdir(exist_ok=True)
+    pd.DataFrame([("OBFR01 Index", 4.33), ("FEDL01 Index", 4.33), ("ESTRON Index", 1.92), ("SONIO/N Index", 4.00),
+                  ("MXIBTIIE Index", 7.75), ("CABROVER Index", 2.75), ("NIBOR1W Index", 4.30)],
+                 columns=["ticker", "valor"]).to_csv(bbg / f"bdh_PX_LAST_{FECHA}.csv", index=False)
+    print(f"mini listo: {len(mini_bd)} instrumentos, {n} facturas, {len(cajas)} filas de cajas")
 
 
 if __name__ == "__main__":
