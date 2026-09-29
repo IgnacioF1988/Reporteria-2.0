@@ -1,0 +1,144 @@
+# Plan — Reportería 2.0 recreada desde cero (TDD, operador-first)
+
+## 1. Contexto
+
+`Reporteria-2.0` calcula Yield y Duration por posición (fondo × PK2) para 9 fondos con una cascada de proveedores y conversiones (breakeven, drops). El diagnóstico previo (`PLAN_MODIFICACION.md`, rama `claude/plan-modificacion`) encontró bugs que alteran el resultado (defaulteados perdidos, duration de breakeven sin reexpresar, yields de bonos vencidos aceptadas, XCCY ignorado), credenciales en git, helpers duplicados, sin tests y sin convención de unidades.
+
+**Decisión:** el repo actual es solo referencia funcional. Se recrea el pipeline desde cero con código minimalista, TDD estricto, `.env` para credenciales, alertas por reglas parametrizadas y una experiencia pensada para el operador que corre el cierre. Se agrega lo que falta: caja y equivalentes, fondos mutuos, pactos y simultáneas, facturas (fuente nueva), agregados a nivel activos / pasivos / patrimonio, y overrides de valores **y atributos por fondo**. No se inventan inputs: se usan los archivos tal como vienen en el repo; facturas según la descripción del usuario.
+
+## 2. Decisiones de levantamiento (cerradas con el usuario)
+
+| Tema | Decisión |
+|---|---|
+| Ubicación | Carpeta **`v2/`** dentro de este repo (paquete `reporteria`, `tests/`, `pyproject.toml`). Se migra a repo nuevo cuando exista. |
+| Alcance v1 | **Todo el legacy** (EXCEPCIONES, JPM, RA, BBG YAS + XCCY, CSHF, JSONL, DEF, breakeven, drops, overrides, alertas, agregados) **más** caja/FFMM/pactos/simultáneas, facturas, agregados A/P/Patrimonio, overrides por fondo. |
+| Universo | **CUBO completo**: todos los `Investment_Type_Code` (1 RF, 2 Equity, 3 Cash, 4 Pay/Rec, 5 Bank Debt, 6 Fund, 7 Derivative) y ambos `BalanceSheet`. Nada queda fuera en silencio. |
+| Caja, FFMM, pactos, simultáneas | Yield/Duration por **reglas fijas** en REGLAS.xlsx. Caja = 0/0. FFMM, pactos y simultáneas: filas en la plantilla con Yield/Dur **vacías**; mientras estén vacías entran a yield 0 y se levanta alerta `REGLA_SIN_VALOR` con el MV afectado. |
+| Facturas | `FACTURAS_{FECHA}.xlsx` en `01_INPUTS/MERCADO`: `PK2 \| Tasa_Mensual \| Monto \| Fecha_Vencimiento`. Tasa en % mensual (1.2 = 1,2 %). **Yield = Tasa × 12 / 100** (lineal). Duration = días al vencimiento / 365. Monto vs TotalMVal → alerta si difiere. |
+| Parametrización | **Un único `REGLAS.xlsx`** en MANUALES (clasificación, defaulteados, overrides de valor, overrides de atributo, alertas, parámetros). **`ID_Fund` numérico** en todos los manuales nuevos (vacío = todos los fondos); nunca nombres. |
+| Atributos sobreescribibles por fondo | Yield/Duration, **Bucket/Tratamiento** (ej. DAP = RF en MDCH, caja en MRCLP; excluir), **Hedge_Currency**, **Índice** (UF/UDI/UVR/CDI/TIIE/NOMINAL), **Estado DEF/PROPDEF**. |
+| Agregados | AW = Σ(y·MV)/ΣMV y DW = Σ(y·MV·D)/Σ(MV·D) por fondo a nivel **ACTIVOS** (Σ Asset), **PASIVOS** (Σ \|Liability\|) y **PATRIMONIO** (A − P; yield = (A·y_A − P·y_P)/(A − P)). Todo lo sin métrica entra a yield 0 / dur 0. Pasivos conservan su métrica si la tienen. |
+| Taxonomía de buckets | **Pendiente**: el usuario sube archivos con el tratamiento actual; de ahí se fija la lista. Mientras, taxonomía provisional (§4.2). El mecanismo no cambia. |
+| Período anterior | Se **corre el pipeline nuevo sobre 20260731** (inputs ya en el repo) como semilla; agosto compara contra eso. |
+| Operador | CLI Windows: `reporteria check / correr --fecha … [--sin-bbg]`. Salida: un Excel por cierre + log. Python 3.11+, xbbg y pyodbc en su máquina. |
+| Fixtures | El usuario deja en `v2/tests/fixtures/` muestras reales de CUBO, BD_INSTRUMENTOS, BD_FUNDS y HOMOL. Hasta entonces, fixtures reconstruidos desde `UNIVERSO_20260731`, `Cajas_jul.xlsx`, `Otros/Fondos_jul.xlsx`. |
+| Unidades | **Decimal** en todo el código y archivos; % solo como `number_format` en Excel. Validación en lectura y assert final. |
+| Política hedgeados | `XCCY_SI_EXISTE` (parámetro); Yield_Drop siempre se calcula y se compara. |
+
+## 3. Arquitectura (`v2/`)
+
+```
+v2/
+├── pyproject.toml          # pandas numpy scipy openpyxl python-dotenv typer; extras [bbg]=xbbg [sql]=pyodbc [dev]=pytest
+├── .env.example            # BEE_SERVER BEE_DB BEE_UID BEE_PWD RUTA_CUBO_DIR RUTA_BIX REPORTERIA_RAIZ
+├── .gitignore              # .env 02_OUTPUTS/ 03_LOGS/ 04_CACHE/ ~$*
+├── README.md · FUTURO.md
+├── reporteria/
+│   ├── config.py           # Rutas(fecha) desde .env; FONDOS {id: alias, base_ccy, política hedge}; mapeos técnicos (curvas, tickers, candidatos de escala) — copiados de legacy pipeline_config.py
+│   ├── modelo.py           # ESQUEMA_POSICIONES / ESQUEMA_CANDIDATOS (columna→dtype→unidad), validar(), limpiar_txt(), pos_id(), pct_a_dec(), assert_decimal()
+│   ├── lectura/            # una función pura por archivo → DataFrame en unidades canónicas
+│   │   ├── cubo.py  maestros.py  reglas.py  manuales.py (excepciones, atributos, facturas)  mercado.py (jpm, ra, curvas csv, paridades)  geneva.py (jsonl, homol)
+│   ├── adaptadores/        # lo único con clases: fronteras externas
+│   │   ├── bbg.py          # Protocol Bloomberg{bdp,bds,bdh}; XbbgBloomberg; CacheBloomberg(inner, dir); FixtureBloomberg(dir)
+│   │   └── fx_sql.py       # Protocol FuenteFx; BeeminingFx (.env, query parametrizada); CacheFx; FixtureFx
+│   ├── universo.py         # armar_universo(cubo, bd_instr, bd_funds, fondos, reglas, cartera_ant) → posiciones
+│   ├── clasificacion.py    # clasificar(pos, reglas.clasificacion) → Bucket, Tratamiento, Regla_ID
+│   ├── finanzas.py         # xirr, duracion, interp_curva, breakeven, reexpresar_moddur, drop  (puras)
+│   ├── escala.py           # candidatos_fx, evaluar_escala, elegir_escala_fx  (puras)
+│   ├── td.py               # clasificar_geneva, construir_td_geneva, normalizar_td_bbg, td_desde_excepcion
+│   ├── fuentes/            # candidatos_<fuente>(pos, insumos, settle, cfg) → (candidatos, tds); sin efectos colaterales
+│   │   ├── reglas_fijas.py facturas.py excepciones.py jpm.py ra.py bbg_yas.py cshf.py jsonl.py
+│   ├── cascada.py          # validar_candidatos (sanidad), elegir (orden por Tratamiento), pendientes_tras (ahorro terminal)
+│   ├── conversion.py       # aplicar_breakeven, aplicar_drops (+ política XCCY)
+│   ├── overrides.py        # aplicar_overrides_atributo (antes de fuentes), aplicar_overrides_valor (al final)
+│   ├── alertas.py          # columnas_derivadas(pos, ant, parametros); evaluar(pos, reglas.alertas) → alertas
+│   ├── agregados.py        # aw_dw(pos) → por fondo × {ACTIVOS, PASIVOS, PATRIMONIO} × grupo
+│   ├── pipeline.py         # correr(fecha, rutas, bbg, fx, opciones) → Resultado(dataclass)
+│   ├── salida.py  log.py  cli.py   # Excel final, logging, typer (check, correr, reglas-validar, importar-cache-legacy, migrar-manuales)
+└── tests/  (conftest, fixtures/, test_e2e_esqueleto, test_<módulo>, test_invariantes, test_golden_20260731)
+```
+
+**Qué NO va:** ORM, clases de dominio, estado global, `print`, lectura de outputs intermedios entre etapas (todo en memoria; intermedios solo para auditoría), credenciales o rutas UNC en código, heurísticas de unidad por fila.
+
+### 3.1 Modelo de datos
+- **`posiciones`**: una fila por `Pos_ID = ID_Fund|PK2|BalanceSheet` (duplicados del CUBO se suman + alerta `CUBO_DUPLICADO`). Grupos de columnas: identidad, atributos de maestro, familia REGS/144A, valores CUBO crudos, valores resueltos (`sP, sQ, FX, P_ef, Q_real, AI_local, FI_local, Escala_Flag`), clasificación (`Bucket, Tratamiento ∈ {CASCADA, FIJO, FACTURA, CERO, EXCLUIR}, Regla_ID`), atributos overrideables (`Hedge_Currency, Indice, Estado_DEF` + origen), resultado (`Yield, Duration, Fuente, Origen, Yield_Moneda, Etapa, Estado ∈ {RESUELTO, FALTANTE, EXCLUIDO}, Motivo`), conversión (`Yield_Papel, Yield_Local, Yield_Drop, Yield_XCCY, Dif_XCCY_Drop_bps, Extrapolado`), período anterior (`*_ant`).
+- **`candidatos`** (tabla larga, una fila por posición × fuente): `Yield, Duration, Yield_Moneda, Origen, Tupla_Completa, Valido, Motivo_Descarte, Detalle`. Toda fuente deja rastro, incluidas las descartadas.
+- **`tds`**, **`alertas`**, **`agregados`** como tablas auxiliares → hojas del Excel.
+
+### 3.2 `REGLAS.xlsx` (MANUALES) — todas las hojas con `ID_Fund` (vacío = todos)
+| Hoja | Columnas | Semántica |
+|---|---|---|
+| `clasificacion` | `ID \| ID_Fund \| Criterio \| Valor \| Bucket \| Tratamiento \| Yield \| Duration \| Comentario` | `Criterio ∈ {PK2, Issue_Type_Code, Investment_Type_Code, Nombre_Regex, Source, BalanceSheet}`. Precedencia: especificidad del criterio (PK2 > Regex > Issue_Type > Investment_Type > Source/BalanceSheet) y regla por fondo > global; empate → primera por `ID` + alerta `REGLA_AMBIGUA`; sin match → `SIN_REGLA` + alerta. `FIJO` con Yield/Dur vacíos → yield 0 + `REGLA_SIN_VALOR`. |
+| `defaulteados` | `ID_Fund \| PK2 \| Estado ∈ {DEF, PROPDEF} \| Comentario` | Yield 0, Dur 0.5, `Etapa=REGLA_DEF`; no consulta fuentes; **sí entra en agregados**. Migra de `DEFAULTEADOS.xlsx`. |
+| `overrides_valor` | `ID_Fund \| PK2 \| Yield \| Duration \| Moneda \| Fuente \| Comentario \| Vigente_Desde \| Vigente_Hasta` | Yield decimal (|Yield| > 1.5 = error de validación). Pisa todo al final. |
+| `overrides_atributo` | `ID_Fund \| PK2 \| Atributo ∈ {Hedge_Currency, Indice, Estado_DEF, Bucket, Tratamiento} \| Valor \| Comentario` | Se aplica antes de las fuentes. `Valor=SIN_HEDGE` anula hedge. `Hedge == Risk_Currency` → se ignora + alerta. |
+| `alertas` | `ID \| Nombre \| Campo \| Operador \| Umbral \| Severidad \| ID_Fund \| Activa \| Requiere_Anterior \| Ambito \| Descripcion` | Ver §3.3. |
+| `parametros` | `Clave \| Valor \| Descripcion` | `yield_max_proveedor=1.0`, `yield_min_proveedor=-0.5`, `politica_hedge=XCCY_SI_EXISTE`, `xccy_drop_max_bps=50`, `cobertura_min_mv=0.95`, `yield_alta_default=0.25`, `yield_alta_MLDL=0.40`, `factura_tolerancia_monto=0.01`, umbrales de escala. |
+
+Ejemplos de `clasificacion` (provisional; los buckets se ajustan con los archivos del usuario): `Investment_Type_Code=3 → CAJA, FIJO, 0, 0` · `Investment_Type_Code=6 → FONDO_MUTUO, FIJO, (vacío)` · `Nombre_Regex ^SIM_ → SIMULTANEA, FIJO, (vacío)` · `Issue_Type_Code=5 → FACTURA, FACTURA` · `Issue_Type_Code=4 → DAP, CASCADA` global y `ID_Fund=20, Issue_Type_Code=4 → CAJA, FIJO, 0, 0` (MRCLP) · `ID_Fund=20, PK2=176142-38 → EQUITY, EXCLUIR` (FIP Treatment Equity). Con esto `FIP.xlsx`, `DEFAULTEADOS.xlsx`, `OVERRIDES.xlsx` y `Cajas_jul.xlsx` dejan de ser inputs (comando `migrar-manuales` los convierte una vez, resolviendo alias de fondo → `ID_Fund`).
+
+### 3.3 Motor de alertas
+`evaluar()` aplica, por regla activa, un operador vectorizado (`>= <= > < == != abs>= in es_nulo no_nulo es_verdadero`) sobre una columna de `posiciones` o una **columna derivada** (lista cerrada en `alertas.columnas_derivadas`, documentada en README). Campo inexistente = error de validación. Severidad ∈ {CRITICA, ALTA, MEDIA, INFO}; Ámbito ∈ {POSICION, FONDO, CORRIDA}; `Requiere_Anterior=SI` sin corrida previa → `INACTIVA` + INFO.
+
+Semilla (rescate legacy F1–F7 + nuevas): A01 yield ≥ umbral (0.25 / 0.40 MLDL) · A02 yield negativa · A03 default con AI>0 · A04 no-default con AI=0 (solo bonos) · A05 precio↑ y yield↑ (ant) · A06 métricas idénticas al mes anterior (ant) · A07 Δyield ≥ 10 pp (ant) · A08 métrica de proveedor inválida (dur ≤ 0, vencido, fuera de rango) · A09 cobertura MV por fondo < 95 % · A10 |XCCY − Drop| ≥ 50 bps · A11 extrapolación fuera de curva · A12 escala/FX en fallback · A13 monto factura ≠ TotalMVal · A14 PK2 duplicado entre EXCEPCIONES · A15 `SIN_REGLA` · A16 FALTANTE con MV · A17 hedge = moneda del papel · A18 insumo opcional ausente · A19 sin maestro · A20 `REGLA_SIN_VALOR` · A21 `CUBO_DUPLICADO`. F4 del legacy (cupón negativo) nunca existió: se documenta en FUTURO.
+
+### 3.4 Adaptadores externos
+- `Bloomberg` Protocol (`bdp`, `bds`, `bdh`). `CacheBloomberg(XbbgBloomberg())` en producción: toda corrida en vivo deja caché CSV en `04_CACHE/{FECHA}/bbg/`; `--sin-bbg` usa `FixtureBloomberg` (solo caché; lo que falta queda FALTANTE + alerta). Tests nunca importan `xbbg`/`pyodbc`.
+- `FuenteFx` Protocol; `BeeminingFx` lee credenciales de `.env` y usa query parametrizada; caché `fx_beemining.csv`. Paridades Excel siempre desde archivo.
+- `importar-cache-legacy --fecha 20260731 --legacy ..` siembra la caché desde `METRICAS` (BBG_Yield/Duration/XCCY), `CSHF/td_detalle` (DES_CASH_FLOW), `CURVAS_DROPS_20260731.csv` (CURVE_TENOR_RATES) y los `FX_usado` de CSHF/JSONL/EXCEPCIONES. Así 20260731 corre completo sin terminal.
+
+### 3.5 Operador
+- `reporteria check --fecha F`: inputs OK/FALTA/OPCIONAL, `.env`, REGLAS válido, estado de caché, antigüedad del jsonl. `reporteria correr --fecha F [--sin-bbg] [--sin-sql] [--fecha-ant] [--solo-hasta etapa]`. Exit codes: 0 OK · 1 OK con CRITICA · 2 input obligatorio/REGLAS inválido · 3 error.
+- Excel `02_OUTPUTS/{FECHA}/REPORTE_{FECHA}.xlsx`: `resumen`, `agregados`, `cartera_final`, `candidatos`, `alertas` (+ `alertas_resumen`), `faltantes`, `plantilla_overrides` (prellenada, copy/paste a REGLAS), `conversiones`, `escala_fx`, `td_detalle`, `insumos`, `reglas_aplicadas`. Más `resumen_corrida.json`. Log `03_LOGS/{FECHA}/corrida_{ts}.log` con conteos por etapa.
+- Falta de inputs: CUBO/BD/REGLAS = fatal; el resto se omite con alerta A18 al inicio y al final del log.
+
+## 4. Estrategia TDD
+
+### 4.1 Patrón de levantamiento por módulo (se repite en cada hito)
+1. Preguntas cerradas al usuario solo si cambian el resultado; el resto se decide y se anota en `README` §Supuestos.
+2. Tabla de decisiones → casos de prueba (nominal, borde, inválido) escritos **antes** del código.
+3. Implementación mínima que pasa; refactor; `pytest -q` verde antes de avanzar al siguiente módulo.
+
+### 4.2 Orden (walking skeleton primero)
+0. `test_e2e_esqueleto`: CUBO mini de 12 filas (caja, payable, derivado, equity, bono JPM, bono RA, DEF, factura, excepción, FIP excluida, pasivo, bono sin fuente) → `pipeline.correr` con stubs devuelve 12 posiciones, ΣMV == CUBO, estados esperados, Excel escrito, alerta FALTANTE.
+1. `modelo` → 2. `lectura` (cubo, maestros, **reglas** con 8 casos inválidos) → 3. `universo` → 4. `clasificacion` → 5. `reglas_fijas`, `facturas`, `cascada` → 6. `finanzas` → 7. `escala` → 8. `excepciones` → 9. `jpm`, `ra` → 10. `adaptadores/bbg` + `bbg_yas` → 11. `td` + `cshf` → 12. `geneva` + `jsonl` → 13. `conversion` → 14. `overrides` → 15. `alertas` → 16. `agregados` → 17. `salida`, `log`, `cli`, `pipeline` → 18. `test_golden_20260731`.
+
+### 4.3 Fixtures (desde archivos reales del repo; se reemplazan por las muestras del usuario cuando lleguen)
+`cubo_mini` (~60 filas de `Otros/Fondos_jul.xlsx` incl. casos de referencia y los 11 duplicados) · `cubo_completo_20260731` (2.878 filas) · `bd_instrumentos_*` reconstruido de `UNIVERSO` + `Cajas_jul` · `bd_funds_mini` · `homol_mini` desde `PROP_JSONL/metricas` · `bond_schedule_mini.jsonl` (RECARR, CASH URUGUA, PATIO PERU, FUNOMM, SOLFACIL ×2, AGROVISION, CONMEX, TOWER ONE, BADAL-A) · `jpm_mini`, `ra_tir_mini` · curvas CSV íntegras · `bbg_cache_20260731/` vía importar-cache-legacy · `fx_beemining_20260731.csv` · `paridades_mini` · `excepciones_mini` (incl. header `hor`, Liability, PK2 duplicado, PIK) · `facturas_mini` (formato nuevo) · `reglas_mini` / `reglas_20260731` · `atributos_mini` · `golden/cartera_final_20260731.csv` + `breakeven` + `drops` desde los outputs legacy.
+
+### 4.4 Casos numéricos de referencia (tests unitarios)
+RECARR primer cupón completo (ancla último cupón pagado, 182 días) · CASH URUGUA Factor 0.3152 (Σ capital × OF/100 == Q_real; cupón sobre saldo vigente) · PATIO PERU Factor 0.95 en dos fondos con FX distinto · caso ARS bee 1382 vs paridades 1471 (gana el que calza) · empate (0.001,1000) vs (1,1) resuelto por ratio, contraste AGROVISION · USDCLP contable 930.86 vs 924.78 → FALLBACK + A12 · breakeven BAARA-B: `Yield_Local=0.063554` y **`Duration_Local=4.1714`** (no 4.305) · drop AES 2034 CLP: `Yield_Drop=0.062862`, XCCY 0.065465, Dif −26 bps, política XCCY · facturas: tasa 0.8 → 0.096, 45 días → 0.1233, monto 2 % ≠ → A13 · XIRR bono par 5 % semestral → 0.050625 · interpolación flat + `Extrapolado` · DEF no consume BBG.
+
+### 4.5 Invariantes (sobre CUBO completo)
+`len(posiciones) == CUBO dedup` · `ΣTotalMVal` por (fondo, BalanceSheet) == CUBO · todo `Pos_ID` con Bucket y Tratamiento · `RESUELTO ⇒ Yield y Duration` · `Yield ∈ [-0.5, 1]` salvo OVERRIDE · ninguna columna de yield con mediana > 1.5 · cada `Fuente` elegida existe como candidato válido · `MV_PATRIMONIO == MV_ACTIVOS − MV_PASIVOS` · pesos por bucket suman 1 · BBG solo consultado para pendientes y nunca para DEF (espía que cuenta tickers).
+
+## 5. Hitos y metas de aprobación
+
+| Hito | Entregable | Se aprueba solo si |
+|---|---|---|
+| **H0 Esqueleto** | `v2/` con pyproject, .env.example, config, modelo, CLI `check`, walking skeleton | `pytest` verde; `reporteria check` corre en Linux sin xbbg/pyodbc; `git grep` no encuentra credenciales |
+| **H1 Universo + reglas** | lectura, universo, clasificación, reglas fijas, facturas, cascada básica, Excel básico, `migrar-manuales` | invariantes sobre 2.878 filas; `SIN_REGLA = 0` con `reglas_20260731`; 472 facturas y 194 DEF identificados; taxonomía fijada con los archivos del usuario |
+| **H2 Fuentes de archivo** | JPM, RA, EXCEPCIONES, sanidad, `candidatos` | golden: yields JPM/RA/EXCEPCIONES ±1 bp y dur ±0.001 vs legacy; ≥ 5 descartes de sanidad documentados (TRNTEL, CZRSBZ, PDCAR, INTSPN, DOCUFO); 8 errores de validación de REGLAS cubiertos |
+| **H3 Motor financiero + TD** | finanzas, escala, td, adaptador BBG con caché, cshf, jsonl, `importar-cache-legacy` | 12 casos numéricos verdes; CSHF reproduce las posiciones legacy con `Escalar_flag OK` ±1 bp; JSONL reproduce las 10; espía BBG confirma ahorro |
+| **H4 Conversiones + overrides** | conversion, overrides (valor/atributo, vigencia) | 243 breakeven `Yield_Local` ±1 bp y duration reexpresada; 106 drops ±1 bp; política XCCY y `Dif_XCCY`; `Hedge == Risk_Currency` no rompe |
+| **H5 Alertas, agregados, salida** | alertas, agregados, salida, log, pipeline completo | `correr --fecha 20260731 --sin-bbg` < 3 min con Excel completo; 21 reglas activas o INACTIVAS con motivo; `MV_PAT == MV_ACT − MV_PAS`; golden completo verde |
+| **H6 Producción** | corrida en vivo (Windows + terminal), README, FUTURO.md, migración a repo nuevo | corrida con BBG deja caché y `--sin-bbg` reproduce idéntico; julio sembrado activa A05–A07 en agosto; operador completa el checklist sin ayuda |
+
+## 6. Diferido a `FUTURO.md`
+RA TIR → yield equivalente por periodicidad · flotantes propios con forward (hoy suma spot) y validación del supuesto "proveedor entrega nominal local" · fuente `ATRIBUTOS` (TD desde `Atributos_*.xlsx`: Bullet/Sinkable/Zero, Upfront Fee) · drop inverso local→USD · conector a fuente de pactos/simultáneas/DAP · refresco automático de jsonl y HOMOL · fallback tenores México y curvas ARS/UYU · breakeven flujo a flujo · atribución AW/DW vs mes anterior · tratamiento fino de pasivos · exportación a base corporativa · alerta cupón negativo (F4).
+
+## 7. Verificación end-to-end
+1. `cd v2 && pytest -q` (unitarios + invariantes; golden marcado `slow`).
+2. `reporteria importar-cache-legacy --fecha 20260731 --legacy ..` → `reporteria check --fecha 20260731` → `reporteria correr --fecha 20260731 --sin-bbg`.
+3. Abrir `REPORTE_20260731.xlsx`: `resumen` (1.418 + 194 DEF resueltas sobre CUBO completo, cobertura por fondo), `alertas` (A08 lista los bonos vencidos), `agregados` cierran A − P, `plantilla_overrides` con los faltantes.
+4. `pytest -m slow` compara contra `golden/` con las diferencias esperadas documentadas (sanidad, duration de breakeven, XCCY).
+5. H6 en Windows: `correr` con terminal → segunda corrida `--sin-bbg` → `diff resumen_corrida.json` vacío.
+
+## 8. Pendientes del usuario (no bloquean H0)
+- Archivos con el tratamiento actual de buckets (define la taxonomía en H1).
+- Muestras reales de CUBO, BD_INSTRUMENTOS, BD_FUNDS, HOMOL en `v2/tests/fixtures/`.
+- Un `FACTURAS_{FECHA}.xlsx` real cuando exista (hoy plantilla definida).
+- Nombre del repo nuevo para la migración en H6.
+
+## 9. Referencias del legacy a tener abiertas (lógica, no código)
+`00_CODIGO/pipeline_config.py` (mapeos, tickers, candidatos de escala) · `03_JSONL_VF.py` (`clasificar`, `build_td_geneva`, `evaluar_escala`, FX por fondo) · `02_CSHF_VF.py` (xirr, duration, face derivado) · `06_BREAKEVEN.py` y `07_DROPS.py` (fórmulas y lectura de curvas) · `08_OVERRIDE.py` (flags F1–F7, AW/DW) · `05_CONSOLIDA.py` (cascada) · `PLAN_MODIFICACION.md` (bugs a no repetir).

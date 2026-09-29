@@ -1,0 +1,25 @@
+[project]
+name = "reporteria"
+version = "0.1.0"
+description = "Yield y Duration por posición para los fondos: pipeline de cierre mensual"
+requires-python = ">=3.11"
+dependencies = ["pandas>=2.2", "numpy", "scipy", "openpyxl", "python-dotenv", "typer"]
+
+[project.optional-dependencies]
+bbg = ["xbbg"]
+sql = ["pyodbc"]
+dev = ["pytest"]
+
+[project.scripts]
+reporteria = "reporteria.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["reporteria*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: corridas completas contra golden"]
