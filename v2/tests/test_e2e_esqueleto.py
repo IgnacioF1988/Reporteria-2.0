@@ -34,6 +34,8 @@ def test_corrida_muestra(rutas, bbg, fx):
     assert _fila(pos, "223985-39", 20)["Bucket_Origen"].startswith("REGLA")
     assert _fila(pos, "176142-38", 20)["Bucket"] == "Equity"                             # FIP por PK2
     assert _fila(pos, "200810-39", 20, "Liability")["Bucket"] == "Payable"
+    cero = pos[pos["Tratamiento"] == "CERO"]
+    assert len(cero) > 300 and (cero["Estado"] == "RESUELTO").all() and (cero["Yield"] == 0).all() and (cero["Fuente"] == "CERO").all()
     assert _fila(pos, "176727-1", 16, "Liability")["Bucket"] == "Financial Debt"
     assert (pos["Ficha_FI"] != "").sum() > 600
     mrclp = pos[(pos["ID_Fund"] == 20) & (pos["Bucket"] != "SIN_REGLA")]

@@ -49,6 +49,10 @@ def elegir(pos: pd.DataFrame, cand: pd.DataFrame, defaulted: pd.DataFrame | None
            settle: pd.Timestamp, yield_type_default: int = 15) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pos = pos.copy()
     trat = pos.set_index("Pos_ID")["Tratamiento"]
+    cero = pos[pos["Tratamiento"].eq("CERO")]
+    if len(cero):        # entran al agregado con yield 0 y duration 0; deben quedar trazados como candidato
+        cand = pd.concat([cand, pd.DataFrame([candidato(p, "CERO", 0.0, 0.0, origen="REGLAS/buckets", valido=True)
+                                              for _, p in cero.iterrows()])], ignore_index=True)
     validos = cand[cand["Valido"]].copy()
     validos["_orden"] = [ORDEN.get(t, []).index(f) if f in ORDEN.get(t, []) else 99
                          for t, f in zip(validos["Pos_ID"].map(trat), validos["Fuente"])]
