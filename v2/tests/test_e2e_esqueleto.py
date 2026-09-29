@@ -40,6 +40,14 @@ def test_corrida_muestra(rutas, bbg):
     assert (mrclp["FX_Exposure"] != "").all()                                              # MRCLP tiene tabla FX
     assert (pos.loc[pos["ID_Fund"] == 13, "FX_Exposure"] == "").all()                      # MDLAT no
 
+    # Familias REGS/144A inferidas por nombre y hedge por política del fondo (MRCLP = A_CLP)
+    fam = pos[pos["ISIN_Hermanos"] != ""]
+    assert len(fam) > 0 and fam["Familia"].ne("").all()
+    usd20 = pos[(pos["ID_Fund"] == 20) & (pos["Risk_Currency"] == "USD") & (pos["Bucket"] == "Fixed Income")]
+    assert (usd20["Hedge_Currency"] == "CLP").all() and (usd20["Hedge_Origen"] == "REGLA").all()
+    assert (pos.loc[pos["ID_Fund"] == 13, "Hedge_Currency"] == "").all()                    # MDLAT sin política
+    assert (al["Nombre"] == "HEDGE_NUEVO").any()                                            # primera corrida: sin mes anterior
+
     # PK2 malformado del CUBO real ('46023', sin id_CURR): queda visible, no se pierde
     raro = pos[pos["PK2"] == "46023"].iloc[0]
     assert raro["Bucket"] == "SIN_REGLA" and (al["Nombre"] == "SIN_MAESTRO").any()

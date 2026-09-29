@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import alertas, cascada, clasificacion, salida, universo
+from . import alertas, cascada, clasificacion, overrides, salida, universo
+from .config import RISK_COUNTRY_TO_LOCAL_CCY, STRONG_CCY, SUFIJOS_SERIE
 from .adaptadores.bbg import Bloomberg, CacheBloomberg, FixtureBloomberg
 from .config import Rutas
 from .fuentes.cajas import candidatos_cajas
@@ -45,6 +46,16 @@ def _opcional(nombre, ruta, lector, log, al):
     return lector(ruta)
 
 
+def _cartera_anterior(rutas: Rutas, log) -> pd.DataFrame | None:
+    p = rutas.reporte_anterior
+    if p is None or not p.exists():
+        log.info("cierre anterior: %s — sin cartera previa (hedge y alertas temporales por regla)", rutas.fecha_ant or "ninguno")
+        return None
+    ant = pd.read_excel(p, sheet_name="cartera_final")
+    log.info("cierre anterior %s: %d posiciones", rutas.fecha_ant, len(ant))
+    return ant
+
+
 def _bloomberg(opciones: Opciones, rutas: Rutas) -> Bloomberg:
     if opciones.bbg is not None:
         return opciones.bbg
@@ -71,6 +82,15 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     log.info("CUBO: %d filas, fondos %s", len(cubo), sorted(cubo["ID_Fund"].unique()))
     pos, a = universo.armar_universo(cubo, M.leer_bd_instrumentos(rutas.bd_instr), bd_funds, M.leer_bd_monedas(rutas.bd_monedas))
     al.append(a)
+    pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Risk_Currency", "Risk_Country", "Indice"))
+    al.append(a)
+    sufijos = tuple(x.strip() for x in str(reglas.parametros["sufijos_serie"]).split(";") if x.strip()) if "sufijos_serie" in reglas.parametros else SUFIJOS_SERIE
+    pos = universo.marcar_familias(pos, sufijos)
+    ant = _cartera_anterior(rutas, log)
+    pos, a = universo.asignar_hedge(pos, reglas.fondos, STRONG_CCY, RISK_COUNTRY_TO_LOCAL_CCY, ant)
+    al.append(a)
+    pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Hedge_Currency",))
+    al.append(a)
 
     fx = {}
     for p in rutas.fx_exposure:
@@ -81,6 +101,11 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
             fx[fid] = M.leer_fx_exposure(p)
     pos, a = clasificacion.clasificar(pos, M.leer_bd_balance_sheet(rutas.bd_balance), reglas.buckets, reglas.clasificacion, fx)
     al.append(a)
+    pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Bucket",))
+    al.append(a)
+    trat = reglas.buckets.set_index("Bucket")["Tratamiento"]
+    ovb = pos["Bucket_Origen"].eq("OVERRIDE")
+    pos.loc[ovb, "Tratamiento"] = pos.loc[ovb, "Bucket"].map(trat).fillna("CASCADA")
     log.info("clasificación: %s", pos["Tratamiento"].value_counts().to_dict())
 
     bbg = _bloomberg(opciones, rutas)

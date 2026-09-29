@@ -9,6 +9,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 POLITICAS_HEDGE = ("", "POR_PAIS", "A_CLP")
+# Familias de serie: mismo bono emitido en tramos legales distintos (Reg S / 144A / EMTN) con ISIN propio.
+# Se infieren por nombre base (sin el sufijo). Ajustable desde REGLAS/parametros: sufijos_serie = "REGS;144A;…".
+SUFIJOS_SERIE = ("REGS", "REGS-S", "REG S", "144A", "144@", "EMTN")
+STRONG_CCY = {"USD", "EUR", "GBP"}
+RISK_COUNTRY_TO_LOCAL_CCY = {"AR": "ARS", "BR": "BRL", "CL": "CLP", "PE": "PEN", "UY": "UYU", "CO": "COP", "MX": "MXN"}
 # Yield_Type del maestro → campo YAS de Bloomberg (BD_YIELD: 1 YTM, 2 YTC, 15 YTW, 28 YTA)
 YIELD_TYPE_BBG = {1: "YAS_YLD_MATURITY", 2: "YAS_YLD_CALL", 15: "YAS_BOND_YLD", 28: "YAS_YLD_AVG_LIFE"}
 
@@ -63,6 +68,10 @@ class Rutas:
     @property
     def excel_final(self) -> Path:
         return self.outputs / f"REPORTE_{self.fecha}.xlsx"
+
+    @property
+    def reporte_anterior(self) -> Path | None:
+        return self.outputs.parent / self.fecha_ant / f"REPORTE_{self.fecha_ant}.xlsx" if self.fecha_ant else None
 
     @classmethod
     def _armar(cls, fecha, raiz, cubo_dir, bix_dirs, mercado, manuales, geneva, outputs, logs, cache, fecha_ant=None):
