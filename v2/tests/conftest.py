@@ -33,3 +33,9 @@ def settle():
 def bbg(fixtures):
     from reporteria.adaptadores.bbg import FixtureBloomberg
     return FixtureBloomberg(fixtures / "bbg_cache", FECHA)
+
+
+@pytest.fixture
+def fx(fixtures):
+    from reporteria.adaptadores.fx_sql import FixtureFx
+    return FixtureFx(fixtures, FECHA)

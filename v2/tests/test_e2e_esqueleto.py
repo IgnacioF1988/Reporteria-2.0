@@ -13,8 +13,8 @@ def _fila(pos, pk2, fondo, bs="Asset"):
     return f.iloc[0]
 
 
-def test_corrida_muestra(rutas, bbg):
-    res = correr(rutas, Opciones(sin_bbg=True, sin_sql=True, bbg=bbg))
+def test_corrida_muestra(rutas, bbg, fx):
+    res = correr(rutas, Opciones(sin_bbg=True, sin_sql=True, bbg=bbg, fx=fx))
     pos, al = res.posiciones, res.alertas
     cubo = pd.read_excel(rutas.cubo)
 
@@ -75,9 +75,16 @@ def test_corrida_muestra(rutas, bbg):
     assert (al["Nombre"] == "FACTURA_MONTO_DISTINTO").sum() == 1
     assert (fac["Duration"].dropna().max() - 120 / 365) < 1e-9
 
-    # Cascada sin proveedores todavía: renta fija queda FALTANTE (H2)
-    assert _fila(pos, "176139-1", 20)["Estado"] == "FALTANTE"
-    assert (al["Nombre"] == "FALTANTE").any()
+    # Fuentes de archivo (H2): JPM por ISIN (y hermanos), RA por nemotécnico, EXCEPCIONES pisa a todos
+    assert (pos["Fuente"] == "JPM").sum() >= 100 and (pos["Fuente"] == "RA").sum() >= 4
+    ltmci = _fila(pos, "176139-1", 20)
+    assert ltmci["Estado"] == "RESUELTO" and ltmci["Fuente"] == "JPM" and ltmci["CalcType_exportable"] == "YTW"
+    assert 0.05 < ltmci["Yield"] < 0.08 and ltmci["Yield_Moneda"] == "USD"
+    exc = pos[pos["Fuente"] == "EXCEPCIONES"]
+    assert len(exc) >= 30 and (exc["CalcType"] == "PROP").all()
+    assert _fila(pos, "527-1", 20)["Fuente"] == "EXCEPCIONES"                             # BAUZA LOAN, flujos del PM
+    assert (pos["Origen"].str.startswith("HERMANO:")).any()
+    assert (al["Nombre"] == "FALTANTE").any()                                              # lo que solo BBG/TD resuelven (H3)
 
     # Cada fuente elegida existe como candidato válido; Excel escrito
     cand = res.candidatos[res.candidatos["Valido"]]

@@ -7,9 +7,28 @@ import pandas as pd
 from . import alertas
 from .modelo import CALC_TYPE_DEF, DURATION_DEF, YIELD_DEF, candidato, vigente
 
-ORDEN = {"CASCADA": ["EXCEPCIONES", "JPM", "RA", "BBG", "CSHF", "JSONL"], "FACTURA": ["FACTURA"], "CAJA": ["CAJA"],
-         "CERO": ["CERO"], "EXCLUIR": ["EXCLUIR"]}
-CALC_TYPE_FUENTE = {"FACTURA": "PROP", "CAJA": "PROP", "CERO": "", "EXCLUIR": ""}
+# EXCEPCIONES es decisión explícita del PM: va primero en todo tratamiento salvo EXCLUIR
+ORDEN = {"CASCADA": ["EXCEPCIONES", "JPM", "RA", "BBG", "CSHF", "JSONL"], "FACTURA": ["EXCEPCIONES", "FACTURA"],
+         "CAJA": ["EXCEPCIONES", "RA", "JPM", "CAJA"], "CERO": ["EXCEPCIONES", "CERO"], "EXCLUIR": ["EXCLUIR"]}
+PROVEEDORES = {"JPM", "RA", "BBG", "CSHF", "JSONL", "EXCEPCIONES"}
+CALC_TYPE_FUENTE = {"FACTURA": "PROP", "CAJA": "PROP", "EXCEPCIONES": "PROP", "CSHF": "PROP", "JSONL": "PROP", "RA": "1", "CERO": "", "EXCLUIR": ""}
+
+
+def validar_candidatos(cand: pd.DataFrame, parametros: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Sanidad sobre métricas de proveedor: duration no positiva o yield fuera de rango invalidan el candidato."""
+    cand = cand.copy()
+    if cand.empty:
+        return cand, alertas.vacias()
+    ymax, ymin = float(parametros.get("yield_max_proveedor", 1.0)), float(parametros.get("yield_min_proveedor", -0.5))
+    prov = cand["Fuente"].isin(PROVEEDORES) & cand["Valido"]
+    dur_mala = prov & (pd.to_numeric(cand["Duration"], errors="coerce") <= 0)
+    yld_mala = prov & ~dur_mala & ~pd.to_numeric(cand["Yield"], errors="coerce").between(ymin, ymax)
+    cand.loc[dur_mala, ["Valido", "Motivo_Descarte"]] = [False, "DURATION_NO_POSITIVA"]
+    cand.loc[yld_mala, ["Valido", "Motivo_Descarte"]] = [False, "YIELD_FUERA_RANGO"]
+    malos = cand[dur_mala | yld_mala]
+    al = alertas.emitir("PROVEEDOR_INVALIDO", "ALTA", malos.assign(Valor=malos["Fuente"] + ":" + malos["Motivo_Descarte"]),
+                        "métrica de proveedor descartada por sanidad; la posición sigue a la siguiente fuente", valor="Valor") if len(malos) else alertas.vacias()
+    return cand, al
 
 
 def _defaults(pos: pd.DataFrame, defaulted: pd.DataFrame | None, reglas_def: pd.DataFrame, settle) -> pd.Series:
@@ -27,7 +46,7 @@ def _defaults(pos: pd.DataFrame, defaulted: pd.DataFrame | None, reglas_def: pd.
 
 
 def elegir(pos: pd.DataFrame, cand: pd.DataFrame, defaulted: pd.DataFrame | None, reglas_def: pd.DataFrame,
-           settle: pd.Timestamp) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+           settle: pd.Timestamp, yield_type_default: int = 15) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pos = pos.copy()
     trat = pos.set_index("Pos_ID")["Tratamiento"]
     validos = cand[cand["Valido"]].copy()
@@ -39,6 +58,9 @@ def elegir(pos: pd.DataFrame, cand: pd.DataFrame, defaulted: pd.DataFrame | None
         pos[c] = g[c].fillna("").to_numpy()
     pos["Etapa"] = pos["Fuente"]
     pos["CalcType"] = pos["Fuente"].map(CALC_TYPE_FUENTE).fillna("")
+    yt = pd.to_numeric(pos.get("Yield_Type"), errors="coerce").fillna(0).astype(int).where(lambda s: s > 0, yield_type_default)
+    de_yield_type = pos["Fuente"].isin(["JPM", "BBG"])
+    pos.loc[de_yield_type, "CalcType"] = yt[de_yield_type].astype(str)
 
     pos["Estado_DEF"] = _defaults(pos, defaulted, reglas_def, settle)
     es_def = pos["Estado_DEF"].ne("") & pos["Tratamiento"].ne("EXCLUIR")

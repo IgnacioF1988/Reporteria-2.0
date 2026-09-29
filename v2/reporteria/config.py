@@ -13,6 +13,7 @@ POLITICAS_HEDGE = ("", "POR_PAIS", "A_CLP")
 # Se infieren por nombre base (sin el sufijo). Ajustable desde REGLAS/parametros: sufijos_serie = "REGS;144A;…".
 SUFIJOS_SERIE = ("REGS", "REGS-S", "REG S", "144A", "144@", "EMTN")
 STRONG_CCY = {"USD", "EUR", "GBP"}
+MAX_DIAS_ATRAS_PARIDADES = 10
 RISK_COUNTRY_TO_LOCAL_CCY = {"AR": "ARS", "BR": "BRL", "CL": "CLP", "PE": "PEN", "UY": "UYU", "CO": "COP", "MX": "MXN"}
 # Yield_Type del maestro → campo YAS de Bloomberg (BD_YIELD: 1 YTM, 2 YTC, 15 YTW, 28 YTA)
 YIELD_TYPE_BBG = {1: "YAS_YLD_MATURITY", 2: "YAS_YLD_CALL", 15: "YAS_BOND_YLD", 28: "YAS_YLD_AVG_LIFE"}

@@ -113,6 +113,45 @@ def main():
                            ("alertas", alertas), ("parametros", params)]:
             df.to_excel(w, sheet_name=nombre, index=False)
 
+    # ── Fuentes de mercado de julio (legacy), recortadas a la muestra ──
+    ids_isin = set(mini_bd["ISIN"].dropna().astype(str))
+    cem = pd.read_excel(CORP / "JPM_CEMBI_GBI_20260731.xlsx", sheet_name="CEMBI")
+    gbi = pd.read_excel(CORP / "JPM_CEMBI_GBI_20260731.xlsx", sheet_name="GBI_Embroad")
+    # hermanos: mismo nombre base → conservar también las series que no están en el CUBO
+    base = mini_bd["Name_Instrumento"].astype(str).str.replace(r"\s+(REGS|REG S|144A|EMTN)\s*$", "", regex=True, case=False)
+    bd_full_isin = bd[bd["Name_Instrumento"].astype(str).str.replace(r"\s+(REGS|REG S|144A|EMTN)\s*$", "", regex=True, case=False).isin(set(base))]
+    ids_isin |= set(bd_full_isin["ISIN"].dropna().astype(str))
+    with pd.ExcelWriter(MINI / f"JPM_CEMBI_GBI_{FECHA}.xlsx") as w:
+        cem[cem["ISIN_ID"].astype(str).isin(ids_isin)].to_excel(w, sheet_name="CEMBI", index=False)
+        gbi[gbi["ISIN"].astype(str).isin(ids_isin)].to_excel(w, sheet_name="GBI_Embroad", index=False)
+    ra = pd.read_excel(CORP / "RA_TIR.xlsx", sheet_name="jul26")
+    nemos = set(mini_bd["Name_Instrumento"].astype(str).str.upper().str.strip())
+    ra_mini = ra[ra.iloc[:, 0].astype(str).str.upper().str.strip().isin(nemos)]
+    with pd.ExcelWriter(MINI / "RA_TIR.xlsx") as w:
+        pd.concat([ra_mini, ra.head(3)]).drop_duplicates().to_excel(w, sheet_name="jul26", index=False)
+    pk2s_cubo = set(cubo["PK2"].astype(str))
+    for f in sorted(CORP.glob("EXCEPCIONES_*.xlsx")):
+        xl = pd.ExcelFile(f)
+        hojas = [sh for sh in xl.sheet_names if sh.strip() in pk2s_cubo]
+        if hojas:
+            with pd.ExcelWriter(MINI / f.name) as w:
+                for sh in hojas:
+                    xl.parse(sh).to_excel(w, sheet_name=sh, index=False)
+    par = pd.ExcelFile(CORP / "4- Carga de paridades.xlsx")
+    with pd.ExcelWriter(MINI / "4- Carga de paridades.xlsx") as w:
+        for sh in ("Data Paridad NY", "Data Paridad LDN", "Data EUR|USD OBS"):
+            d = par.parse(sh)
+            d = d[pd.to_datetime(d["Date"], errors="coerce").between(SETTLE - pd.Timedelta(days=12), SETTLE)]
+            d.to_excel(w, sheet_name=sh, index=False)
+    # FX beemining del cierre (valores usados por el legacy; USDARS sintético del caso documentado)
+    pd.DataFrame([("USDCLP", 924.78), ("USDCLF", 0.02273), ("USDBRL", 5.0729), ("USDCOP", 3152.58), ("USDMXN", 17.3426),
+                  ("USDPEN", 3.3985), ("USDUYU", 40.265), ("USDUVR", 7.568429), ("USDARS", 1382.0)],
+                 columns=["instrumento", "valor"]).to_csv(MINI / f"fx_beemining_{FECHA}.csv", index=False)
+    # Golden: resultados del legacy para excepciones (comparación ±1 bp)
+    leg = pd.read_excel(CORP / "LEGACY_EXCEPCIONES_20260731.xlsx", sheet_name="metricas")
+    leg[["ID_Fund", "PK2", "Moneda", "sP", "sQ", "Escalar_flag", "FX_usado", "Q_real", "FI_local", "Yield_efectiva", "ModDur"]].to_csv(
+        MINI / "golden_excepciones_20260731.csv", index=False)
+
     # Caché BBG de fixture: niveles de los índices de referencia de cajas (PX_LAST, en %, como los entrega BBG)
     bbg = MINI / "bbg_cache"; bbg.mkdir(exist_ok=True)
     pd.DataFrame([("OBFR01 Index", 4.33), ("FEDL01 Index", 4.33), ("ESTRON Index", 1.92), ("SONIO/N Index", 4.00),
