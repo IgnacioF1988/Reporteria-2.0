@@ -39,6 +39,24 @@ def check(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | N
     raise typer.Exit(2 if faltan else 0)
 
 
+def _estado_facts(r: Rutas) -> list[str]:
+    """Facts: cliente ssh, clave y llave en .env, caché del cierre."""
+    import os
+    import shutil
+    from .adaptadores.facts import FixtureFacts, DEFAULTS
+    out = []
+    ssh = shutil.which("ssh") is not None
+    clave = bool(os.environ.get("MONEDA_BI_PASSWORD"))
+    llave = Path(os.environ.get("MONEDA_BI_SSH_KEY") or DEFAULTS["MONEDA_BI_SSH_KEY"]).expanduser()
+    listo = ssh and clave and llave.exists()
+    out.append(f"[{'OK ' if listo else 'opc. '}] Facts (facturas): ssh {'OK' if ssh else 'NO ENCONTRADO'}, MONEDA_BI_PASSWORD {'definida' if clave else 'FALTA'}, "
+               f"llave {llave} {'OK' if llave.exists() else 'FALTA'}{'' if listo else ' → correr con --sin-facts o completar .env (ver CHECKLIST)'}")
+    t = FixtureFacts(r.cache, r.fecha).tablas(r.fecha)
+    det = f"{len(t['facturas'])} facturas, {len(t['prorrogas'])} prórrogas, {len(t['cambios'])} cambios → --sin-facts posible" if t else "vacía → la corrida baja las tablas"
+    out.append(f"[{'OK ' if t else 'opc. '}] caché Facts {r.fecha}: {det}")
+    return out
+
+
 def _estado_entorno(r: Rutas) -> list[str]:
     """Líneas de diagnóstico: .env, xbbg/pyodbc, caché del cierre, antigüedad del jsonl, manuales legacy sin migrar."""
     import importlib.util
@@ -50,9 +68,10 @@ def _estado_entorno(r: Rutas) -> list[str]:
     presentes = [v for v in vars_ if os.environ.get(v)]
     out.append(f"[{'OK ' if env.exists() or len(presentes) == len(vars_) else 'opc. '}] .env {'encontrado' if env.exists() else 'no encontrado en la raíz'}; "
                f"variables definidas: {len(presentes)}/{len(vars_)} {sorted(set(vars_) - set(presentes)) or ''}")
-    for mod, flag in (("xbbg", "--sin-bbg"), ("pyodbc", "--sin-sql")):
+    for mod, flag in (("xbbg", "--sin-bbg"), ("pyodbc", "--sin-sql"), ("psycopg2", "--sin-facts")):
         ok = importlib.util.find_spec(mod) is not None
         out.append(f"[{'OK ' if ok else 'opc. '}] {mod:16} {'instalado' if ok else f'no instalado → correr con {flag}'}")
+    out.extend(_estado_facts(r))
     cache = Path(r.cache)
     if cache.is_dir():
         bdp, bdh, bds = len(list(cache.glob("bdp_*.csv"))), len(list(cache.glob("bdh_*.csv"))), [d.name for d in cache.glob("bds_*") if d.is_dir()]
@@ -71,16 +90,31 @@ def _estado_entorno(r: Rutas) -> list[str]:
     return out
 
 
+@app.command("facts-probar")
+def facts_probar():
+    """Abre el túnel SSH a Facts y cuenta filas de bi_facturas / bi_prorrogas / bi_cambios (no escribe caché)."""
+    from dotenv import load_dotenv
+    from .adaptadores.facts import FactsSql
+    load_dotenv()
+    try:
+        r = FactsSql().resumen()
+    except Exception as e:
+        typer.echo(f"ERROR: {e}")
+        raise typer.Exit(3)
+    typer.echo(f"Facts OK: {r['facturas']} facturas, {r['prorrogas']} prórrogas, {r['cambios']} cambios (último cambio {r['ultimo_cambio']})")
+
+
 @app.command()
 def correr(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | None = None,
            sin_bbg: bool = typer.Option(False, "--sin-bbg", help="No consulta Bloomberg; usa caché"),
            sin_sql: bool = typer.Option(False, "--sin-sql", help="No consulta beemining; usa paridades y caché"),
+           sin_facts: bool = typer.Option(False, "--sin-facts", help="No consulta la base de Facts; usa caché o FACTURAS_F.xlsx"),
            fecha_ant: str | None = typer.Option(None, help="Forzar cierre anterior YYYYMMDD")):
     """Corre el cierre completo y deja REPORTE_{FECHA}.xlsx en 02_OUTPUTS/{FECHA}."""
     from .pipeline import Opciones, correr as _correr
     r = Rutas.desde_env(fecha, raiz, fecha_ant)
     try:
-        res = _correr(r, Opciones(sin_bbg=sin_bbg, sin_sql=sin_sql))
+        res = _correr(r, Opciones(sin_bbg=sin_bbg, sin_sql=sin_sql, sin_facts=sin_facts))
     except FileNotFoundError as e:
         typer.echo(f"ERROR: {e}")
         raise typer.Exit(2)

@@ -40,3 +40,18 @@ def test_factura_sin_posicion_y_fondo_desconocido_avisan():
     cand, al = candidatos_facturas(pos, rpt, HOMOL, FONDOS, SETTLE, tolerancia_monto=0.01)
     assert len(cand) == 1 and cand.iloc[0]["Valido"]
     assert {"FACTURA_SIN_POSICION", "FACTURA_FONDO_DESCONOCIDO"} <= set(al["Nombre"])
+
+
+def test_frame_de_facts_origen_tasa_prorroga_y_viva_por_fecha_pago():
+    pos = pd.DataFrame([_pos("101-39", 101), _pos("102-39", 102), _pos("103-39", 103)])
+    rpt = pd.DataFrame([_rpt(documento_operacion_id=1, tasa_origen="PRORROGA", vencimiento_origen="PRORROGA", cambios_revertidos=0),
+                        _rpt(documento_operacion_id=2, nemotecnico="FAC2", estado="pagado", fecha_pago=SETTLE + pd.Timedelta(days=5),
+                             tasa_origen="ORIGINAL", vencimiento_origen="ORIGINAL", cambios_revertidos=1),
+                        _rpt(documento_operacion_id=3, nemotecnico="FAC3", estado="pagado", fecha_pago=SETTLE - pd.Timedelta(days=1),
+                             tasa_origen="ORIGINAL", vencimiento_origen="ORIGINAL", cambios_revertidos=0)])
+    cand, al = candidatos_facturas(pos, rpt, HOMOL, FONDOS, SETTLE)
+    c = cand.set_index("PK2")
+    assert c.loc["101-39", "Origen"] == "FACTS:FAC1" and "tasa_origen=PRORROGA" in c.loc["101-39", "Detalle"]
+    assert c.loc["102-39", "Valido"]                                   # pagada después del cierre: viva al cierre
+    assert not c.loc["103-39", "Valido"] and c.loc["103-39", "Motivo_Descarte"] == "SIN_FACTURA"
+    assert (al["Nombre"] == "FACTURA_TASA_PRORROGA").sum() == 1 and (al["Nombre"] == "FACTURA_ASOF_REVERTIDA").sum() == 1

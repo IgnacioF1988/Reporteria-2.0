@@ -88,3 +88,21 @@ def test_migrar_manuales_y_comparar(raiz_produccion, monkeypatch, fixtures):
     r = runner.invoke(app, ["comparar", "--fecha", "20260731", "--raiz", str(raiz_produccion), "--otro", str(otro)])
     assert r.exit_code == 1 and "2 diferencias" in r.output, r.output
     assert list((raiz_produccion / "02_OUTPUTS" / "20260731").glob("comparacion_*.csv"))
+
+
+def test_check_diagnostica_facts_y_correr_sin_facts_usa_cache(raiz_produccion, monkeypatch):
+    for v in ("RUTA_CUBO_DIR", "RUTA_BIX", "REPORTERIA_RAIZ", "MONEDA_BI_PASSWORD"):
+        monkeypatch.delenv(v, raising=False)
+    r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(raiz_produccion)])
+    assert r.exit_code == 0, r.output
+    assert "Facts (facturas)" in r.output and "MONEDA_BI_PASSWORD FALTA" in r.output and "caché Facts 20260731: 302 facturas" in r.output
+    r = runner.invoke(app, ["correr", "--fecha", "20260731", "--raiz", str(raiz_produccion), "--sin-bbg", "--sin-facts"])
+    assert r.exit_code in (0, 1), r.output
+    log = next((raiz_produccion / "03_LOGS" / "20260731").glob("corrida_*.log")).read_text(encoding="utf-8")
+    assert "FACTS: 302 facturas" in log and "vivas al cierre 20260731: 301" in log
+
+
+def test_facts_probar_sin_clave_sale_3(monkeypatch):
+    monkeypatch.delenv("MONEDA_BI_PASSWORD", raising=False)
+    r = runner.invoke(app, ["facts-probar"])
+    assert r.exit_code == 3 and "MONEDA_BI_PASSWORD" in r.output

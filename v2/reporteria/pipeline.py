@@ -11,6 +11,7 @@ import pandas as pd
 from . import agregados, alertas, cascada, clasificacion, overrides, salida, universo
 from .config import MAX_DIAS_ATRAS_PARIDADES, RISK_COUNTRY_TO_LOCAL_CCY, STRONG_CCY, SUFIJOS_SERIE
 from .adaptadores.bbg import Bloomberg, CacheBloomberg, FixtureBloomberg
+from .adaptadores.facts import CacheFacts, FixtureFacts, FuenteFacts
 from .adaptadores.fx_sql import CacheFx, FixtureFx, FuenteFx
 from .conversion import convertir
 from .curvas import curvas_drops, leer_curvas_csv
@@ -29,6 +30,7 @@ from .fuentes.ra import candidatos_ra
 from .lectura import maestros as M
 from .lectura.cubo import leer_cubo
 from .lectura.geneva import leer_jsonl
+from .lectura.facts import facturas_al_cierre, normalizar_tablas
 from .lectura.manuales import leer_excepciones, leer_facturas
 from .lectura.mercado import hoja_ra, leer_jpm, leer_paridades, leer_ra
 from .lectura.reglas import leer_reglas
@@ -41,8 +43,10 @@ from .salida import COLS_CARTERA
 class Opciones:
     sin_bbg: bool = False
     sin_sql: bool = False
+    sin_facts: bool = False
     bbg: Bloomberg | None = None      # inyectable (tests); si None se arma según sin_bbg
     fx: FuenteFx | None = None
+    facts: FuenteFacts | None = None
 
 
 @dataclass
@@ -65,6 +69,29 @@ def _opcional(nombre, ruta, lector, log, al):
         al.append(alertas.emitir("INSUMO_FALTANTE", "ALTA", detalle=f"{nombre}: {ruta}", ambito="CORRIDA"))
         return None
     return lector(ruta)
+
+
+def _facturas(opciones: Opciones, rutas: Rutas, log, al) -> pd.DataFrame | None:
+    """Base de Facts (caché → túnel) y, si no hay tablas, el RPT en Excel; sin nada → INSUMO_FALTANTE."""
+    tablas = {}
+    try:
+        tablas = _facts(opciones, rutas).tablas(rutas.fecha)
+    except Exception as e:                     # sin clave, sin ssh, sin red…: se sigue con Excel/caché
+        log.warning("Facts no disponible (%s): se usa FACTURAS_%s.xlsx si existe", e, rutas.fecha)
+        al.append(alertas.emitir("FACTS_SIN_CONEXION", "ALTA", detalle=f"base de facturas: {e}", ambito="CORRIDA"))
+    if tablas:
+        try:
+            t = normalizar_tablas(tablas)
+            rpt = facturas_al_cierre(t, rutas.settle)
+        except ValueError as e:                # columnas o unidades inesperadas en la base: se avisa y se sigue con Excel
+            log.warning("Facts con tablas inválidas (%s): se usa FACTURAS_%s.xlsx si existe", e, rutas.fecha)
+            al.append(alertas.emitir("FACTS_INVALIDO", "ALTA", detalle=str(e), ambito="CORRIDA"))
+            return _opcional("FACTURAS", rutas.facturas, leer_facturas, log, al)
+        log.info("FACTS: %d facturas, %d prórrogas, %d cambios; vivas al cierre %s: %d (tasa de prórroga: %d, cambios revertidos: %d)",
+                 len(t["facturas"]), len(t["prorrogas"]), len(t["cambios"]), rutas.fecha, len(rpt),
+                 int(rpt["tasa_origen"].eq("PRORROGA").sum()), int((rpt["cambios_revertidos"] > 0).sum()))
+        return rpt
+    return _opcional("FACTURAS", rutas.facturas, leer_facturas, log, al)
 
 
 def _escala_cfg(par: dict) -> EscalaCfg:
@@ -113,6 +140,15 @@ def _fx(opciones: Opciones, rutas: Rutas) -> FuenteFx:
         return FixtureFx(rutas.cache, rutas.fecha)
     from .adaptadores.fx_sql import BeeminingFx
     return CacheFx(BeeminingFx(), rutas.cache, rutas.fecha)
+
+
+def _facts(opciones: Opciones, rutas: Rutas) -> FuenteFacts:
+    if opciones.facts is not None:
+        return opciones.facts
+    if opciones.sin_facts:
+        return FixtureFacts(rutas.cache, rutas.fecha)
+    from .adaptadores.facts import FactsSql
+    return CacheFacts(FactsSql(), rutas.cache, rutas.fecha)
 
 
 def _bloomberg(opciones: Opciones, rutas: Rutas) -> Bloomberg:
@@ -170,7 +206,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     bbg = _bloomberg(opciones, rutas)
     cands = []
     c, a = candidatos_cajas(pos, reglas.cajas, bbg, rutas.fecha); cands.append(c); al.append(a)
-    rpt = _opcional("FACTURAS", rutas.facturas, leer_facturas, log, al)
+    rpt = _facturas(opciones, rutas, log, al)
     homol = _opcional("HOMOL_INSTRUMENTOS", rutas.homol, lambda p: M.leer_homol(p, "GENEVA"), log, al)
     homol_funds = _opcional("HOMOL_FUNDS", rutas.homol_funds, M.leer_homol_funds, log, al)
     # El RPT puede nombrar al fondo como en HOMOL_FUNDS (MRentaCLP) o como en BD_FUNDS (MRCLP): se aceptan ambos

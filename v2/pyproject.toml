@@ -8,6 +8,7 @@ dependencies = ["pandas>=2.2", "numpy", "scipy", "openpyxl", "python-dotenv", "t
 [project.optional-dependencies]
 bbg = ["xbbg", "pyarrow>=22"]
 sql = ["pyodbc"]
+facts = ["psycopg2-binary"]
 dev = ["pytest"]
 
 [project.scripts]

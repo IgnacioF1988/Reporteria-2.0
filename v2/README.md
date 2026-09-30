@@ -30,6 +30,7 @@ reporteria correr --fecha 20260731 --sin-bbg  # sin terminal: usa la caché de 0
 reporteria importar-cache-legacy --fecha 20260731 --legacy ..   # siembra la caché desde METRICAS/CSHF/CURVAS/ATRIBUTOS del legacy
 reporteria migrar-manuales --fecha 20260731 --legacy .. [--aplicar] [--incluir-defaulteados]   # FIP, Atributos_*, OVERRIDES → REGLAS
 reporteria comparar --fecha 20260731 --otro 02_OUTPUTS/20260731/REPORTE_20260731_terminal.xlsx  # terminal vs --sin-bbg
+reporteria facts-probar                                          # túnel SSH a Facts: cuenta filas de las tres tablas
 ```
 El paso a paso del operador está en [`CHECKLIST_CIERRE.md`](CHECKLIST_CIERRE.md).
 Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input obligatorio o REGLAS inválido.
@@ -39,7 +40,7 @@ Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input oblig
 |---|---|---|
 | `CASCADA` (renta fija) | EXCEPCIONES → JPM → RA → **BBG YAS** → **CSHF** (TD de Bloomberg) → **JSONL** (TD propia desde Geneva) | BBG y CSHF solo para lo que sigue pendiente y no es DEF |
 | `CAJA` | EXCEPCIONES → RA → JPM → regla `cajas` (índice + spread) | nada |
-| `FACTURA` | EXCEPCIONES → RPT de facturas | nada |
+| `FACTURA` | EXCEPCIONES → base de Facts (caché → túnel SSH) → RPT en Excel | nada |
 | `CERO` / `EXCLUIR` | yield 0 / fuera de métricas | nada |
 
 ### Conversión a la moneda del fondo (H4)
@@ -110,6 +111,7 @@ Derivadas disponibles: `Delta_Yield`, `Delta_Yield_bps`, `Delta_Duration`, `Delt
 Alertas estructurales (las emite el pipeline, no se configuran): CUBO_DUPLICADO, SIN_MAESTRO, SIN_FONDO, SIN_REGLA, REGLA_AMBIGUA,
 HEDGE_*, OVERRIDE_SIN_POSICION, CAJA_SIN_REGLA, CAJA_SIN_VALOR, INDICE_SIN_NIVEL, FACTURA_*, PK2_DUPLICADO, ESCALA_FALLBACK,
 PROVEEDOR_INVALIDO, FAMILIA_INFERIDA, YIELD_TYPE_DEFAULT, AI_SOSPECHOSO, RA_TIR_MENSUAL, FALTANTE, INSUMO_FALTANTE, FX_SIN_BEEMINING,
+FACTS_SIN_CONEXION, FACTS_INVALIDO,
 SIN_BREAKEVEN, SIN_CONVERSION_HEDGE, XCCY_VS_DROP, XCCY_FUERA_RANGO, INDICE_SIN_CURVA, CURVA_EXTRAPOLADA, INDICE_NUEVO, MONEDA_SIN_CURVAS_DROP, CURVA_SIN_DATOS,
 AGREGADO_INCONSISTENTE.
 
@@ -126,9 +128,19 @@ La corrida verifica `MV_PAT = MV_ACT − MV_PAS` y que los pesos sumen 1 (alerta
 sobre cuántas posiciones) · `insumos`. Más `resumen_corrida_{FECHA}.json`.
 
 ## Facturas
-Se lee la hoja `Facturas` del RPT de Facts (`FACTURAS_{FECHA}.xlsx` en MERCADO). Cruce `nemotecnico → HOMOL_INSTRUMENTOS
-(GENEVA) → ID_Instrumento` y `fondo → HOMOL_FUNDS / BD_FUNDS → ID_Fund`. Se excluyen las pagadas. Yield =
-`tasa_mensual × 12` (decimal), Duration = días al vencimiento vigente / 365. `monto_compra` ≠ TotalMVal → alerta.
+Fuente principal: la base de Facts (`bi_facturas`, `bi_prorrogas`, `bi_cambios`) por túnel SSH + Postgres
+(`adaptadores/facts.py`). La corrida baja las tres tablas completas y deja `04_CACHE/{FECHA}/facts_*.csv`; `--sin-facts` usa
+solo la caché. Si no hay caché ni conexión se lee el RPT en Excel (`FACTURAS_{FECHA}.xlsx` en MERCADO) y, si tampoco,
+`INSUMO_FALTANTE`. Cruce `nemotecnico → HOMOL_INSTRUMENTOS (GENEVA) → ID_Instrumento` y `fondo → HOMOL_FUNDS / BD_FUNDS →
+ID_Fund`. Yield = `tasa_mensual × 12` (decimal, base 30 días), Duration = días al vencimiento vigente / 365.
+
+Estado **al cierre** (`lectura/facts.facturas_al_cierre`): la base está viva, así que se revierten con `bi_cambios` los cambios
+de tasa, vencimiento y monto posteriores al cierre (`FACTURA_ASOF_REVERTIDA`, INFO); una factura pagada después del cierre
+sigue viva al cierre (viva = sin `fecha_pago` o pagada después); si hay prórroga iniciada al cierre o antes, mandan su tasa y
+su vencimiento (`tasa_origen=PRORROGA`, alerta INFO `FACTURA_TASA_PRORROGA`; el RPT usa la tasa original). `monto_compra` ≠
+TotalMVal → `FACTURA_MONTO_DISTINTO`. Conexión: `MONEDA_BI_PASSWORD` y `MONEDA_BI_SSH_KEY` en `.env` (nunca en git); host y
+usuarios `FACTS_*` con los valores del proveedor en `.env.example`; `pip install -e .[facts]`; `reporteria facts-probar`
+abre el túnel y cuenta filas sin correr el cierre.
 
 ## Desarrollo
 ```
