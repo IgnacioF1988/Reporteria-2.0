@@ -93,34 +93,104 @@ class CacheBloomberg(FixtureBloomberg):
 
 
 class XbbgBloomberg:
-    """Terminal real vía xbbg. Import diferido: solo existe en Windows con terminal."""
+    """Terminal real vía xbbg. Import diferido: solo existe en Windows con terminal.
 
-    def __init__(self, lote: int = 100):
-        from xbbg import blp
+    Soporta xbbg 0.7 (respuestas anchas: index=ticker, columnas=campos; overrides como kwargs) y xbbg ≥ 1.0 (respuestas
+    largas ticker/field/value; overrides en MAYÚSCULAS vía `overrides=`). Los overrides del pipeline llegan en cualquier
+    capitalización (settle_dt, SETTLE_DT, YAS_XCCY_FOREIGN_CURRENCY) y acá se normalizan a como los espera Bloomberg.
+    """
+
+    def __init__(self, lote: int = 100, blp=None, version: str | None = None):
+        if blp is None:
+            import xbbg
+            from xbbg import blp
+            version = version or getattr(xbbg, "__version__", "0")
         self.blp, self.lote = blp, lote
+        self.nueva_api = int(str(version or "0").split(".")[0].split("+")[0] or 0) >= 1
+
+    @staticmethod
+    def _ov(overrides: dict) -> dict:
+        out = {}
+        for k, v in overrides.items():
+            if v is None:
+                continue
+            out[str(k).strip().upper()] = v.strftime("%Y%m%d") if hasattr(v, "strftime") else str(v)
+        return out
+
+    def _llamar(self, fn, *args, **kw):
+        ov = self._ov(kw.pop("overrides", {}) or {})
+        if self.nueva_api:
+            return fn(*args, overrides=ov, **kw) if ov else fn(*args, **kw)
+        return fn(*args, **ov, **kw)
+
+    @staticmethod
+    def _valor(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        s = str(v).strip()
+        if s == "" or s.lower() in ("nan", "none", "<na>"):
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return s
+
+    def _puntual(self, res, campo: str) -> dict:
+        """Respuesta de bdp/bdh → {ticker: valor} para `campo`, sea formato largo (≥1.0) o ancho (0.7)."""
+        out = {}
+        if res is None or len(res) == 0:
+            return out
+        d = res if isinstance(res, pd.DataFrame) else pd.DataFrame(res)
+        cols = {str(c).strip().lower(): c for c in d.columns}
+        if "ticker" in cols and "field" in cols and "value" in cols:                       # largo
+            m = d[cols["field"]].astype(str).str.strip().str.upper().eq(campo.upper())
+            for t, v in zip(d.loc[m, cols["ticker"]], d.loc[m, cols["value"]]):
+                if (val := self._valor(v)) is not None and str(t).strip() != "__SECURITY_ERROR__":
+                    out[str(t).strip()] = val
+            return out
+        if isinstance(d.columns, pd.MultiIndex):                                            # bdh 0.7: (ticker, campo)
+            for (t, f) in d.columns:
+                if str(f).strip().upper() == campo.upper() and len(d[(t, f)].dropna()):
+                    if (val := self._valor(d[(t, f)].dropna().iloc[-1])) is not None:
+                        out[str(t).strip()] = val
+            return out
+        col = next((c for c in d.columns if str(c).strip().upper() == campo.upper()), None)   # bdp 0.7: index=ticker
+        if col is not None:
+            for t, v in d[col].items():
+                if (val := self._valor(v)) is not None:
+                    out[str(t).strip()] = val
+        return out
+
+    @staticmethod
+    def _serie(out: dict) -> pd.Series:
+        return pd.Series(out, dtype=float if out and all(isinstance(v, float) for v in out.values()) else object)
 
     def bdp(self, tickers, campo, **overrides):
         out = {}
         for i in range(0, len(tickers), self.lote):
-            res = self.blp.bdp(tickers=tickers[i:i + self.lote], flds=campo, **overrides)
-            if res is None or res.empty:
-                continue
-            res.columns = [str(c).strip().upper() for c in res.columns]
-            if campo.upper() in res.columns:
-                for t, v in res[campo.upper()].items():
-                    if pd.notna(v) and str(v).strip() != "":
-                        out[str(t).strip()] = float(v) if isinstance(v, (int, float)) else str(v).strip()
-        return pd.Series(out, dtype=float if all(isinstance(v, float) for v in out.values()) else object)
+            res = self._llamar(self.blp.bdp, tickers=list(tickers[i:i + self.lote]), flds=campo, overrides=overrides)
+            out.update(self._puntual(res, campo))
+        return self._serie(out)
 
     def bds(self, ticker, campo, **overrides):
         try:
-            d = self.blp.bds(ticker, campo, **overrides)
+            d = self._llamar(self.blp.bds, ticker, campo, overrides=overrides)
         except Exception:
             return pd.DataFrame()
-        return pd.DataFrame() if d is None else d.reset_index(drop=True)
+        if d is None or len(d) == 0:
+            return pd.DataFrame()
+        d = (d if isinstance(d, pd.DataFrame) else pd.DataFrame(d)).reset_index(drop=True)
+        return d.drop(columns=[c for c in d.columns if str(c).strip().lower() in ("ticker", "field")])
 
     def historico(self, tickers, campo, fecha):
         out = {}
+        if self.nueva_api:
+            try:
+                res = self.blp.bdh(tickers=list(tickers), flds=campo, start_date=fecha, end_date=fecha)
+                out.update(self._puntual(res, campo))
+            except Exception:
+                pass
+            return self._serie(out)
         for t in tickers:
             try:
                 d = self.blp.bdh(tickers=t, flds=campo, start_date=fecha, end_date=fecha)
@@ -128,4 +198,4 @@ class XbbgBloomberg:
                     out[t] = float(d.iloc[-1, 0])
             except Exception:      # ticker inexistente o sin dato: se reporta aguas arriba como INDICE_SIN_NIVEL
                 pass
-        return pd.Series(out, dtype=float)
+        return self._serie(out)

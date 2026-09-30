@@ -24,6 +24,10 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
 7. Overrides de atributo (hedge distinto, índice, bucket por fondo): `REGLAS/overrides_atributo` con `Field` ∈ Hedge_Currency, Indice, Bucket, Risk_Currency, Risk_Country y vigencia. Correr de nuevo `--sin-bbg`.
 8. Cerrar: el reporte final es el último `REPORTE_F.xlsx`. El cierre siguiente lo usa como cierre anterior (hedge heredado y alertas temporales A05–A07).
 
+## Versiones
+- `xbbg` 0.7 y ≥ 1.0 funcionan (el adaptador detecta la versión). Si pandas avisa `Backend 'pyarrow' requires pyarrow >= 22`, es solo un aviso; se quita con `pip install --upgrade pyarrow`.
+- Si `python` abre la Microsoft Store, usar `py -3.12 -m reporteria.cli ...` (o la versión 3.11+ instalada: `py -0` las lista).
+
 ## Códigos de salida
 `0` OK · `1` OK con alertas CRÍTICAS · `2` falta un input obligatorio o REGLAS inválido · `comparar`: `1` = hay diferencias.
 
