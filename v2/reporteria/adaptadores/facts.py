@@ -64,6 +64,14 @@ class CacheFacts(FixtureFacts):
         return vivo
 
 
+def _cerrar(proc: subprocess.Popen) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
 class FactsSql:
     """Túnel `ssh -L` con el cliente del sistema + psycopg2. Descarga las tres tablas completas (pocos segundos)."""
 
@@ -83,7 +91,7 @@ class FactsSql:
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0)); puerto = s.getsockname()[1]
         cmd = ["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "StrictHostKeyChecking=accept-new",
-               "-o", "ConnectTimeout=15", "-i", str(llave), "-p", _cfg("FACTS_SSH_PORT"),
+               "-o", "ServerAliveInterval=30", "-o", "ConnectTimeout=15", "-i", str(llave), "-p", _cfg("FACTS_SSH_PORT"),
                "-L", f"127.0.0.1:{puerto}:127.0.0.1:{_cfg('FACTS_DB_PORT')}", f"{_cfg('FACTS_SSH_USER')}@{_cfg('FACTS_SSH_HOST')}"]
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         limite = time.time() + self.espera
@@ -95,7 +103,7 @@ class FactsSql:
                     return proc, puerto
             except OSError:
                 time.sleep(0.5)
-        proc.kill()
+        _cerrar(proc)
         raise RuntimeError(f"túnel SSH a {_cfg('FACTS_SSH_HOST')} no respondió en {self.espera:.0f} s")
 
     def _consultar(self, sqls: dict[str, str]) -> dict[str, pd.DataFrame]:
@@ -115,7 +123,7 @@ class FactsSql:
             finally:
                 conn.close()
         finally:
-            proc.kill()
+            _cerrar(proc)
 
     def tablas(self, fecha: str) -> dict[str, pd.DataFrame]:
         return self._consultar({t: f"SELECT * FROM bi_{t}" for t in TABLAS})
