@@ -1,0 +1,12 @@
+17:30:05  INFO    Reportería | fecha=20260731 | raiz=\\Moneda03\Compartidos\Inteligencia de Negocios y Mercados\Desarrollo\Cristopher Olmedo\Reporteria 2.0
+17:30:07  INFO    CUBO: 7197 filas, fondos [np.int64(2), np.int64(8), np.int64(11), np.int64(13), np.int64(14), np.int64(15), np.int64(16), np.int64(17), np.int64(19), np.int64(20), np.int64(23), np.int64(25), np.int64(26), np.int64(28), np.int64(31), np.int64(33), np.int64(34), np.int64(35), np.int64(36), np.int64(37), np.int64(38), np.int64(39), np.int64(40), np.int64(42), np.int64(43), np.int64(44), np.int64(45), np.int64(47), np.int64(48), np.int64(50), np.int64(51), np.int64(52), np.int64(53), np.int64(57), np.int64(58), np.int64(59), np.int64(62), np.int64(64), np.int64(65), np.int64(67), np.int64(68), np.int64(69), np.int64(70), np.int64(71), np.int64(72), np.int64(73), np.int64(74), np.int64(75), np.int64(76)]
+17:30:28  INFO    cierre anterior: ninguno — sin cartera previa (hedge y alertas temporales por regla)
+17:30:30  INFO    clasificación: {'FACTURA': 3540, 'CASCADA': 1775, 'CERO': 1636, 'CAJA': 246}
+17:30:30  WARNING FACTURAS: no encontrado — se omite
+17:30:42  INFO    EXCEPCIONES: 58 PK2 con flujos, 101 posiciones evaluadas
+17:30:43  INFO    pendientes para Bloomberg YAS: 619
+17:30:46  INFO    pendientes para CSHF (DES_CASH_FLOW): 217
+17:31:09  INFO    pendientes para JSONL (Geneva): 167
+17:31:16  INFO    conversiones: {'OK': 249, 'XCCY': 104, 'DROP': 24, 'PROVEEDOR_NOMINAL': 7, 'SIN_CONVERSION': 6, 'SIN_CURVAS:CPI': 1}
+17:31:16  INFO    alertas: {'ALTA': 3918, 'MEDIA': 720, 'INFO': 159, 'CRITICA': 67}
+17:31:21  INFO    estado: {'FALTANTE': 3701, 'RESUELTO': 3496} | fuentes: {'CERO': 1636, 'JPM': 600, 'BBG': 402, 'RA': 261, 'CAJA': 244, 'REGLA_DEF': 205, 'EXCEPCIONES': 92, 'CSHF': 50, 'JSONL': 6}
