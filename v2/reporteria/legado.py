@@ -110,3 +110,200 @@ def importar_cache_legacy(legacy: Path, cache: Path, fecha: str) -> dict[str, in
         out["CPN_TYP"] = len(cpn); _guardar_bdp(cache, "CPN_TYP", fecha, {}, cpn)
         out["RESET_IDX"] = len(reset); _guardar_bdp(cache, "RESET_IDX", fecha, {}, reset)
     return out
+
+
+# ── Migración de manuales del legacy a REGLAS.xlsx ──────────────────────────────────────────────────────────────
+def _fondos_alias(bd_funds_path: Path, homol_funds_path: Path | None) -> dict[str, int]:
+    """Nombre (upper) → ID_Fund desde BD_FUNDS (FundShortName, NombreTupungato, FundName) y HOMOL_FUNDS (Portfolio)."""
+    f = pd.read_excel(bd_funds_path)
+    out = {}
+    for col in ("FundShortName", "NombreTupungato", "FundName"):
+        if col in f.columns:
+            out.update({str(k).strip().upper(): int(v) for k, v in zip(f[col], f["ID_Fund"]) if pd.notna(k) and pd.notna(v)})
+    if homol_funds_path and Path(homol_funds_path).exists():
+        h = pd.read_excel(homol_funds_path, sheet_name="HOMOL_FUNDS")
+        out.update({str(k).strip().upper(): int(v) for k, v in zip(h["Portfolio"], h["ID_Fund"]) if pd.notna(k) and pd.notna(v)})
+    return out
+
+
+def _split_pk2(pk2: str) -> tuple[int | None, int | None]:
+    a, _, b = str(pk2).strip().partition("-")
+    try:
+        return int(a), (int(b) if b else None)
+    except ValueError:
+        return None, None
+
+
+def migrar_cajas(template: Path, alias: dict[str, int]) -> pd.DataFrame:
+    """Template_Cajas.xlsx (corporativo) → hoja `cajas`: ID_Fund, PK2, Indice_Referencia, Spread_Anual (decimal), Dias."""
+    xl = pd.ExcelFile(template)
+    hojas = [h for h in xl.sheet_names if h != "Reportes"]
+    partes = []
+    for h in hojas:
+        d = xl.parse(h)
+        if "PK2" not in d.columns or d.empty:
+            continue
+        partes.append(d)
+    if not partes:
+        return pd.DataFrame(columns=["ID_Fund", "PK2", "Indice_Referencia", "Spread_Anual", "Dias", "Comentario"])
+    tc = pd.concat(partes, ignore_index=True)
+    ind = tc["Indice Referencia"] if "Indice Referencia" in tc.columns else pd.Series("", index=tc.index)
+    return pd.DataFrame({
+        "ID_Fund": tc["FundShortName"].astype(str).str.strip().str.upper().map(alias).astype("Int64"),
+        "PK2": tc["PK2"].astype(str).str.strip(),
+        "Indice_Referencia": ind.where(ind.notna(), ""),
+        "Spread_Anual": pd.to_numeric(tc.get("Spread (Anual)"), errors="coerce"),
+        "Dias": pd.to_numeric(tc.get("Fecha_Vencimiento"), errors="coerce"),
+        "Comentario": "migrado de Template_Cajas " + tc["Name_Instrumento"].astype(str),
+    }).drop_duplicates(["ID_Fund", "PK2"]).reset_index(drop=True)
+
+
+def _buscar_manual(legacy: Path, nombre: str) -> Path | None:
+    for d in (legacy, legacy / "01_INPUTS" / "MANUALES", legacy / "01_INPUTS" / "GENEVA", legacy / "legacy_manuales"):
+        if (d / nombre).exists():
+            return d / nombre
+    return None
+
+
+def _atributos_legacy(legacy: Path) -> list[Path]:
+    out = []
+    for d in (legacy, legacy / "01_INPUTS" / "MANUALES", legacy / "01_INPUTS" / "GENEVA", legacy / "legacy_manuales"):
+        out += [p for p in d.glob("Atributos_*.xlsx") if not p.name.startswith("~$")] if d.is_dir() else []
+    return sorted(set(out))
+
+
+def migrar_manuales(legacy: Path, alias: dict[str, int], ids_instrumento: set[int] | None = None, incluir_defaulteados: bool = False,
+                    template_cajas: Path | None = None) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
+    """({hoja: filas nuevas en el esquema de REGLAS}, informe). Nombres de fondo → ID_Fund; PK2 → ID/SubID_Instrumento."""
+    from .indices import normalizar_indice
+    legacy = Path(legacy)
+    nuevas: dict[str, list[dict]] = {"clasificacion": [], "cajas": [], "defaulteados": [], "overrides_valor": [], "overrides_atributo": []}
+    informe = []
+
+    def fondo(nombre) -> int | None:
+        return alias.get(str(nombre).strip().upper())
+
+    def avisar(archivo, leidas, generadas, avisos):
+        informe.append(dict(Archivo=archivo, Filas_leidas=leidas, Filas_generadas=generadas, Avisos="; ".join(sorted(set(avisos))) if avisos else ""))
+
+    def sin_maestro(iid, avisos):
+        if ids_instrumento is not None and iid is not None and iid not in ids_instrumento:
+            avisos.append(f"ID_Instrumento {iid} no está en BD_INSTRUMENTOS")
+
+    fip = _buscar_manual(legacy, "FIP.xlsx")
+    if fip:
+        d = pd.read_excel(fip); avisos = []
+        for _, r in d.iterrows():
+            fid = fondo(r["Fund_Name"])
+            if fid is None:
+                avisos.append(f"fondo desconocido {r['Fund_Name']}"); continue
+            if str(r.get("Treatment", "")).strip().upper() == "EQUITY":
+                nuevas["clasificacion"].append(dict(ID=None, ID_Fund=fid, Criterio="PK2", Valor=str(r["PK2"]).strip(), Bucket="Equity", Tratamiento="",
+                                                    Comentario=f"migrado de FIP.xlsx: {r.get('Name_Instrumento', '')} Treatment Equity"))
+        avisar("FIP.xlsx", len(d), len(nuevas["clasificacion"]), avisos)
+    for atr in _atributos_legacy(legacy):
+        d = pd.read_excel(atr); avisos, n = [], 0
+        col = next((c for c in d.columns if str(c).strip().lower().replace("_", " ") == "index name"), None)
+        if col is None or "PK2" not in d.columns:
+            avisar(atr.name, len(d), 0, ["sin columna 'Index Name' o PK2"]); continue
+        for _, r in d.iterrows():
+            idx = normalizar_indice(r[col])
+            if not idx or str(r.get("Index", "YES")).strip().upper() == "NO":
+                continue
+            fid = fondo(r.get("Fund_Name", atr.stem.split("_", 1)[-1]))
+            if fid is None:
+                avisos.append(f"fondo desconocido {r.get('Fund_Name', atr.stem)}"); continue
+            iid, sub = _split_pk2(r["PK2"])
+            if iid is None:
+                avisos.append(f"PK2 inválido {r['PK2']}"); continue
+            sin_maestro(iid, avisos)
+            if idx not in INDICES and idx not in ("NOMINAL",):
+                avisos.append(f"índice {r[col]} → {idx} sin curvas en config.INDICES")
+            nuevas["overrides_atributo"].append(dict(ID_Fund=fid, ID_Instrumento=iid, SubID_Instrumento=sub, Field="Indice", Value=idx,
+                                                     Fecha_Desde=None, Fecha_Fin=None, Comentario=f"migrado de {atr.name}: {r.get('Name_Instrumento', '')} Index Name={r[col]}"))
+            n += 1
+        avisar(atr.name, len(d), n, avisos)
+    deff = _buscar_manual(legacy, "DEFAULTEADOS.xlsx")
+    if deff:
+        d = pd.read_excel(deff); avisos, n = [], 0
+        if incluir_defaulteados:
+            for _, r in d.iterrows():
+                fid = fondo(r["Fondo"])
+                if fid is None:
+                    avisos.append(f"fondo desconocido {r['Fondo']}"); continue
+                iid, _ = _split_pk2(r["PK2"])
+                if iid is None:
+                    avisos.append(f"PK2 inválido {r['PK2']}"); continue
+                est = str(r.get("DEF", "")).strip().upper()
+                if est not in ("DEF", "PROPDEF"):
+                    avisos.append(f"estado {est} inválido para {r['PK2']}"); continue
+                sin_maestro(iid, avisos)
+                nuevas["defaulteados"].append(dict(ID_Fund=fid, ID_Instrumento=iid, Estado=est, Fecha_Desde=None, Fecha_Fin=None,
+                                                   Comentario=f"migrado de DEFAULTEADOS.xlsx: {r.get('Instrumento', '')}"))
+                n += 1
+        else:
+            avisos.append("omitido: el corporativo DEFAULTED.xlsx es la fuente; use --incluir-defaulteados para traerlo")
+        avisar("DEFAULTEADOS.xlsx", len(d), n, avisos)
+    ov = _buscar_manual(legacy, "OVERRIDES.xlsx")
+    if ov:
+        d = pd.read_excel(ov); avisos, n = [], 0
+        for _, r in d.iterrows():
+            y = pd.to_numeric(r.get("Yield"), errors="coerce")
+            if pd.isna(y):
+                continue
+            fid = fondo(r.get("Fund_Name", ""))
+            if fid is None:
+                avisos.append(f"fondo desconocido {r.get('Fund_Name', '')}"); continue
+            iid, sub = _split_pk2(r["PK2"])
+            if iid is None:
+                avisos.append(f"PK2 inválido {r['PK2']}"); continue
+            if abs(y) > 1:
+                avisos.append(f"{r['PK2']}: yield {y} se asume en % y se divide por 100"); y = y / 100
+            sin_maestro(iid, avisos)
+            nuevas["overrides_valor"].append(dict(ID_Fund=fid, ID_Instrumento=iid, SubID_Instrumento=sub, Yield=float(y),
+                                                  Duration=pd.to_numeric(r.get("Dur"), errors="coerce"), Fecha_Desde=None, Fecha_Fin=None,
+                                                  Moneda=str(r.get("Currency", "") or ""), Fuente=str(r.get("Source", "") or ""),
+                                                  Comentario=f"migrado de OVERRIDES.xlsx: {r.get('Comment', '')}"))
+            n += 1
+        avisar("OVERRIDES.xlsx", len(d), n, avisos)
+    if template_cajas and Path(template_cajas).exists():
+        c = migrar_cajas(template_cajas, alias)
+        sin_fondo = c["ID_Fund"].isna().sum()
+        nuevas["cajas"] = c[c["ID_Fund"].notna()].to_dict("records")
+        avisar(Path(template_cajas).name, len(c), len(nuevas["cajas"]), [f"{sin_fondo} filas con fondo desconocido"] if sin_fondo else [])
+    if (legacy / "Cajas_jul.xlsx").exists():
+        avisar("Cajas_jul.xlsx", 0, 0, ["inventario de cajas sin índice ni spread: no se migra (los valores salen de Template_Cajas)"])
+    return {k: pd.DataFrame(v) for k, v in nuevas.items() if v}, pd.DataFrame(informe, columns=["Archivo", "Filas_leidas", "Filas_generadas", "Avisos"])
+
+
+LLAVES = {"clasificacion": ["ID_Fund", "Criterio", "Valor"], "cajas": ["ID_Fund", "PK2"], "defaulteados": ["ID_Fund", "ID_Instrumento"],
+          "overrides_valor": ["ID_Fund", "ID_Instrumento", "SubID_Instrumento"], "overrides_atributo": ["ID_Fund", "ID_Instrumento", "SubID_Instrumento", "Field"]}
+
+
+def fusionar_reglas(reglas_path: Path, nuevas: dict[str, pd.DataFrame], salida: Path, fondos_validos: set[int] | None = None) -> dict[str, int]:
+    """Agrega las filas nuevas a cada hoja de REGLAS sin duplicar por llave natural, renumera clasificacion.ID, valida y escribe."""
+    from .lectura.reglas import leer_reglas
+    hojas = pd.read_excel(reglas_path, sheet_name=None)
+    agregadas = {}
+    for hoja, df in nuevas.items():
+        base = hojas[hoja]
+        llave = LLAVES[hoja]
+        df = df.copy()
+        for c in base.columns:
+            if c not in df.columns:
+                df[c] = None
+        def _k(d):
+            return d[llave].apply(lambda r: "|".join(str(x).strip().upper().replace(".0", "") if pd.notna(x) else "" for x in r), axis=1)
+        existentes = set(_k(base)) if len(base) else set()
+        df = df[~_k(df).isin(existentes)]
+        agregadas[hoja] = len(df)
+        hojas[hoja] = pd.concat([base, df[base.columns]], ignore_index=True)
+        if hoja == "clasificacion":
+            hojas[hoja]["ID"] = range(1, len(hojas[hoja]) + 1)
+    salida = Path(salida)
+    salida.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(salida) as w:
+        for n, d in hojas.items():
+            d.to_excel(w, sheet_name=n, index=False)
+    leer_reglas(salida, fondos_validos)        # lanza ValueError si la fusión no es válida
+    return agregadas

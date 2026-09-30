@@ -65,16 +65,10 @@ def main():
     rpt.to_excel(MINI / f"FACTURAS_{FECHA}.xlsx", sheet_name="Facturas", index=False)
 
     # REGLAS.xlsx inicial
-    tc = pd.concat([pd.read_excel(CORP / "Template_Cajas.xlsx", sheet_name=s) for s in ("Fondos USD", "MLDL")])
+    from reporteria.legado import _fondos_alias, migrar_cajas
     funds = pd.read_excel(CORP / "BD_FUNDS.xlsx")
     nombre2id = dict(zip(funds["FundShortName"], funds["ID_Fund"]))
-    tc["ID_Fund"] = tc["FundShortName"].map(nombre2id)
-    cajas = pd.DataFrame({
-        "ID_Fund": tc["ID_Fund"].astype("Int64"), "PK2": tc["PK2"].astype(str).str.strip(),
-        "Indice_Referencia": tc["Indice Referencia"].where(tc["Indice Referencia"].notna(), ""),
-        "Spread_Anual": tc["Spread (Anual)"], "Dias": tc["Fecha_Vencimiento"],
-        "Comentario": "migrado de Template_Cajas " + tc["Name_Instrumento"].astype(str),
-    }).drop_duplicates(["ID_Fund", "PK2"])
+    cajas = migrar_cajas(CORP / "Template_Cajas.xlsx", _fondos_alias(CORP / "BD_FUNDS.xlsx", CORP / "HOMOL_FUNDS.xlsx"))
     buckets = pd.DataFrame([
         ("Fixed Income", "CASCADA", 1), ("Equity", "CERO", 2), ("Cash, Mutual Funds & Others", "CAJA", 3),
         ("Restricted Cash", "CAJA", 4), ("Restricted Cash (Deriv.)", "CAJA", 5), ("Restricted Cash (REPO)", "CAJA", 6),

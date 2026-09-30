@@ -37,3 +37,22 @@ def escribir_excel(hojas: dict[str, pd.DataFrame], path: Path) -> Path:
             (df if len(df) else pd.DataFrame({"info": ["sin filas"]})).to_excel(w, sheet_name=nombre[:31], index=False)
             _formatear(w.sheets[nombre[:31]], {"Yield", "Yield_Local", "Yield_Drop", "Yield_Papel", "Yield_XCCY", "AW", "DW", "Peso_MV", "Cobertura"})
     return path
+
+
+def comparar_carteras(a: pd.DataFrame, b: pd.DataFrame, tol: float = 1e-9) -> pd.DataFrame:
+    """Diferencias entre dos `cartera_final` por Pos_ID: solo en uno, o Yield/Duration/Fuente/Conversion distintos."""
+    a, b = a.drop_duplicates("Pos_ID").set_index("Pos_ID"), b.drop_duplicates("Pos_ID").set_index("Pos_ID")
+    filas = []
+    for pid in sorted(set(a.index) ^ set(b.index)):
+        filas.append(dict(Pos_ID=pid, Campo="Pos_ID", A="presente" if pid in a.index else "", B="presente" if pid in b.index else ""))
+    comunes = a.index.intersection(b.index)
+    for c in ("Yield", "Duration"):
+        if c in a.columns and c in b.columns:
+            x, y = pd.to_numeric(a.loc[comunes, c], errors="coerce"), pd.to_numeric(b.loc[comunes, c], errors="coerce")
+            m = ~((x - y).abs() <= tol) & ~(x.isna() & y.isna())
+            filas += [dict(Pos_ID=p, Campo=c, A=x[p], B=y[p]) for p in comunes[m.to_numpy()]]
+    for c in ("Fuente", "Conversion", "Estado"):
+        if c in a.columns and c in b.columns:
+            x, y = a.loc[comunes, c].fillna("").astype(str), b.loc[comunes, c].fillna("").astype(str)
+            filas += [dict(Pos_ID=p, Campo=c, A=x[p], B=y[p]) for p in comunes[(x != y).to_numpy()]]
+    return pd.DataFrame(filas, columns=["Pos_ID", "Campo", "A", "B"])

@@ -40,7 +40,8 @@ CCY_AMBIGUA = {"ARS", "BRL", "COP", "MXN", "PEN", "UYU", "CLP", "MXV"}
 INFLACION_PAIS = {"CL": "UF", "CH": "UF", "MX": "UDI", "CO": "UVR", "BR": "IPCA", "UY": "UI", "AR": "BONCER", "PE": "VAC"}
 RESET_IDX_A_INDICE = {"BZDIOVRA": "CDI", "MXIBTIEF": "TIIE", "MXIBTIIE": "TIIE", "SOFRRATE": "SOFR",
                       "H15T1Y": "UST1Y", "H15T5Y": "UST5Y", "H15T10Y": "UST10Y"}
-ALIAS_INDICE = {"CLCPI": "UF", "CLF": "UF", "CER": "BONCER", "MXCPI": "UDI", "UVR COSTER": "UVR", "BRCPI": "IPCA", "UYCPI": "UI"}
+ALIAS_INDICE = {"CLCPI": "UF", "CLF": "UF", "CER": "BONCER", "MXCPI": "UDI", "UVR COSTER": "UVR", "COCPI": "UVR", "BRCPI": "IPCA",
+                "UYCPI": "UI", "UI CURNCY": "UI", "MXIBTIIE": "TIIE", "MXIBTIEF": "TIIE", "BZDIOVRA": "CDI"}
 FUENTES_TD_PROPIA = {"EXCEPCIONES", "CSHF", "JSONL"}
 # ── Drops: papel USD swapeado a moneda local nominal ─────────────────────────────────────────────────────────────
 # drop = local_all_in − pata_usd al plazo de la duration. ADD: local + basis (bps); DIRECT: una curva ya combinada.
