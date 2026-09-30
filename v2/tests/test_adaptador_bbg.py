@@ -145,3 +145,19 @@ def test_pedido_rechazado_no_es_caida_y_la_cascada_sigue():
     val, org = _cascada(x, ["A", "X"], {"X": ["H"]}, "YAS_BOND_YLD", settle_dt="20260731")
     assert val == {"A": 5.0} and org == {"A": "DIRECTO"} and not x.caida and len(x.avisos) == 1
     assert "All securities failed" in x.avisos[0]
+
+
+def test_respuesta_bds_vacia_se_cachea_y_se_relee_sin_error(tmp_path):
+    class SinTabla:
+        def __init__(self):
+            self.n = 0
+
+        def bds(self, *a, **k):
+            self.n += 1
+            return pd.DataFrame()
+
+    inner = SinTabla()
+    bbg = CacheBloomberg(inner, tmp_path, "20260731")
+    assert bbg.bds("Z Corp", "DES_CASH_FLOW", SETTLE_DT="20260731").empty
+    assert bbg.bds("Z Corp", "DES_CASH_FLOW", SETTLE_DT="20260731").empty and inner.n == 1     # relee el vacío sin preguntar
+    assert FixtureBloomberg(tmp_path, "20260731").bds("Z Corp", "DES_CASH_FLOW").empty

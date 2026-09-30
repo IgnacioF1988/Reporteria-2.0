@@ -14,6 +14,16 @@ class Bloomberg(Protocol):
     def bds(self, ticker: str, campo: str, **overrides) -> pd.DataFrame: ...           # bulk (tablas de desarrollo, curvas)
 
 
+def _leer_bds(p: Path) -> pd.DataFrame:
+    """CSV de una respuesta bulk; un archivo vacío (respuesta sin filas, guardada para no repreguntar) es un DataFrame vacío."""
+    if not p.exists() or p.stat().st_size == 0:
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(p)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
+
+
 def _ruta_bds(dir_cache: Path, campo: str, ticker: str) -> Path:
     return dir_cache / f"bds_{campo}" / (re.sub(r"[^A-Za-z0-9@._ -]", "_", ticker) + ".csv")
 
@@ -51,8 +61,7 @@ class FixtureBloomberg:
 
     def bds(self, ticker, campo, **overrides):
         self.pedidos.append((f"bds:{campo}", (ticker,)))
-        p = _ruta_bds(self.dir, campo, ticker)
-        return pd.read_csv(p) if p.exists() else pd.DataFrame()
+        return _leer_bds(_ruta_bds(self.dir, campo, ticker))
 
 
 class CacheBloomberg(FixtureBloomberg):
@@ -85,7 +94,7 @@ class CacheBloomberg(FixtureBloomberg):
         self.pedidos.append((f"bds:{campo}", (ticker,)))
         p = _ruta_bds(self.dir, campo, ticker)
         if p.exists():
-            return pd.read_csv(p)
+            return _leer_bds(p)
         d = self.inner.bds(ticker, campo, **overrides)
         p.parent.mkdir(parents=True, exist_ok=True)
         d.to_csv(p, index=False)          # también la respuesta vacía: evita repreguntar
