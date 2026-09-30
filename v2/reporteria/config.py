@@ -31,6 +31,9 @@ INDICES = {
     "VAC":    dict(cat="REAL", real="VACPERU",     nom="LCPERU",      ccy="PEN"),
     "CDI":    dict(cat="RATE", real="CDIBRAZIL",   nom=None,          ccy="BRL"),
     "TIIE":   dict(cat="RATE", real="MXNTIIEMXN",  nom=None,          ccy="MXN"),
+    # Flotantes chilenos sin curva cargada: la TD del PM ya trae el cupón all-in → la yield queda nominal (INDICE_SIN_CURVA, INFO)
+    "TAB30":    dict(cat="RATE", real=None, nom=None, ccy="CLP"),
+    "CHIBPROM": dict(cat="RATE", real=None, nom=None, ccy="CLP"),
 }
 INDICES_SIN_CONVERSION = {"", "NOMINAL", "SOFR", "UST1Y", "UST5Y", "UST10Y"}
 # Monedas que declaran el índice por sí mismas (BD_Monedas: supramoneda ≠ código)

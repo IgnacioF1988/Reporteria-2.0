@@ -33,6 +33,7 @@ def convertir(pos: pd.DataFrame, curvas_real: dict, curvas_nom: dict, curvas_dro
     if politica not in POLITICAS_XCCY:
         raise ValueError(f"REGLAS/parametros: politica_hedge={politica!r}; válidas {list(POLITICAS_XCCY)}")
     tope_bps = float(parametros.get("xccy_drop_max_bps", 50))
+    ymax, ymin = float(parametros.get("yield_max_proveedor", 1.0)), float(parametros.get("yield_min_proveedor", -0.5))
     for c in ("Yield_Papel", "Duration_Papel", "Yield_Drop", "Dif_XCCY_Drop_bps"):
         pos[c] = np.nan
     if "Yield_XCCY" not in pos.columns:
@@ -43,7 +44,7 @@ def convertir(pos: pd.DataFrame, curvas_real: dict, curvas_nom: dict, curvas_dro
     hedge = limpiar_txt(pos["Hedge_Currency"]).str.upper()
     ccy = limpiar_txt(pos["Risk_Currency"]).str.upper()
     aplica = pos["Estado"].eq("RESUELTO") & ~pos["Fuente"].isin(NO_CONVERTIBLES) & pos["Yield"].notna() & pos["Duration"].notna()
-    det, al_be, al_hd, al_dif, al_prov, al_ccy = [], [], [], [], [], []
+    det, al_be, al_hd, al_dif, al_prov, al_ccy, al_sc, al_xr = [], [], [], [], [], [], [], []
     for i in pos.index[aplica]:
         p = pos.loc[i]
         idx, dias = ind[i], float(p["Duration"]) * 365.25
@@ -54,6 +55,10 @@ def convertir(pos: pd.DataFrame, curvas_real: dict, curvas_nom: dict, curvas_dro
             if cfg is None:
                 al_be.append((i, f"índice {idx} sin curvas en config.INDICES"))
                 det.append(_fila(p, "BREAKEVEN", Resultado=f"SIN_CURVAS:{idx}")); continue
+            if cfg["cat"] == "RATE" and cfg["real"] is None:      # índice conocido sin curva: la yield ya es nominal local
+                pos.loc[i, "Conversion"] = "PROVEEDOR_NOMINAL"
+                al_sc.append(i)
+                det.append(_fila(p, "SUMA_INDICE", Yield=y, Duration=d, Resultado="PROVEEDOR_NOMINAL")); continue
             r_real, ext = interpolar(dias, curvas_real.get(cfg["real"], pd.DataFrame()))
             if cfg["cat"] == "REAL":
                 r_nom, ext2 = interpolar(dias, curvas_nom.get(cfg["nom"], pd.DataFrame()))
@@ -82,6 +87,8 @@ def convertir(pos: pd.DataFrame, curvas_real: dict, curvas_nom: dict, curvas_dro
         if hedge[i] and hedge[i] != ccy[i]:
             xccy = float(p["Yield_XCCY"]) if pd.notna(p.get("Yield_XCCY")) else np.nan
             fila = _fila(p, "HEDGE", Yield_XCCY=xccy)
+            if pd.notna(xccy) and not (ymin <= xccy <= ymax):       # mismo rango de sanidad que los proveedores
+                al_xr.append(i); xccy = np.nan
             y_drop, r_l, r_b, r_u, dr, ext = np.nan, np.nan, np.nan, np.nan, np.nan, False
             if ccy[i] != "USD":
                 al_ccy.append(i)
@@ -123,6 +130,10 @@ def convertir(pos: pd.DataFrame, curvas_real: dict, curvas_nom: dict, curvas_dro
         al.append(alertas.emitir("XCCY_VS_DROP", "MEDIA", pos.loc[al_dif], f"|XCCY − drop propio| > {tope_bps:.0f} bps", valor="Dif_XCCY_Drop_bps"))
     if al_prov:
         al.append(alertas.emitir("FLOTANTE_PROVEEDOR", "INFO", pos.loc[al_prov], "flotante con yield de proveedor: se asume ya nominal en moneda local (supuesto no verificado)", valor="Indice"))
+    if al_sc:
+        al.append(alertas.emitir("INDICE_SIN_CURVA", "INFO", pos.loc[al_sc], "índice flotante sin curva en config.INDICES: la yield de la TD se toma como nominal local", valor="Indice"))
+    if al_xr:
+        al.append(alertas.emitir("XCCY_FUERA_RANGO", "MEDIA", pos.loc[al_xr], f"Yield_XCCY fuera de [{ymin:g}, {ymax:g}]: se ignora y se usa el drop propio", valor="Yield_XCCY"))
     if pos["Extrapolado"].any():
         al.append(alertas.emitir("CURVA_EXTRAPOLADA", "INFO", pos[pos["Extrapolado"].astype(bool)], "plazo fuera del rango de tenores: tasa plana del extremo", valor="Duration_Papel"))
     return pos, pd.DataFrame(det, columns=COLS_DETALLE), alertas.juntar(*al)

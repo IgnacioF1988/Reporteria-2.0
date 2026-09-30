@@ -1,6 +1,6 @@
 # Iteraciones futuras (fuera del alcance v1, documentadas para no perderlas)
 
-1. RA: convertir TIR a yield efectiva equivalente según PERIODICIDAD_CUPONES (hoy se usa tal cual).
+1. RA: convertir TIR a yield efectiva equivalente según PERIODICIDAD_CUPONES (hoy se usa tal cual; UNICO ya se anualiza × `ra_unico_factor` como nominal 30/360).
 2. Flotantes propios (CDI/TIIE/TAB30/CHIBPROM/CPI): proyección con curva forward y recálculo de XIRR; validar el supuesto "proveedor externo ya entrega nominal local".
 3. Fuente ATRIBUTOS: tabla de desarrollo desde Atributos_*.xlsx (Bullet/Sinkable/Zero, Cpn Rate, Periodicity, Next_Cpn Date, Upfront Fee) entre EXCEPCIONES y JPM.
 4. Drop inverso: papel en moneda local swapeado a USD en fondo USD.

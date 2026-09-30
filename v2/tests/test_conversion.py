@@ -84,3 +84,26 @@ def test_flotante_propio_suma_indice_y_de_proveedor_no():
     assert out.iloc[0]["Conversion"] == "SUMA_INDICE" and abs(out.iloc[0]["Yield"] - 0.1628) < 1e-12
     out, det, al = convertir(_pos(Indice="CDI", Risk_Currency="BRL", Yield_Moneda="BRL", Fuente="BBG", Yield=0.15, Duration=3.0), cdi, {}, {}, {})
     assert out.iloc[0]["Conversion"] == "PROVEEDOR_NOMINAL" and out.iloc[0]["Yield"] == 0.15 and (al["Nombre"] == "FLOTANTE_PROVEEDOR").sum() == 1
+
+
+def test_xccy_fuera_de_rango_se_ignora_y_usa_drop():
+    # PCRD (MLDL): papel 24,6 % USD; Bloomberg devolvió un XCCY de 426 % → no se usa; queda el drop propio y alerta MEDIA
+    hed = dict(Risk_Currency="USD", Yield_Moneda="USD", Indice="NOMINAL", Hedge_Currency="CLP", Yield=0.246309, Duration=0.283118, Yield_XCCY=4.265199)
+    out, det, al = convertir(_pos(**hed), {}, {}, {"CLP": CLP}, {"yield_max_proveedor": 1.0})
+    assert out["Conversion"].iloc[0] == "DROP" and out["Yield"].iloc[0] < 0.3 and abs(out["Yield_XCCY"].iloc[0] - 4.265199) < 1e-9
+    assert "XCCY_FUERA_RANGO" in set(al["Nombre"]) and "XCCY_VS_DROP" not in set(al["Nombre"])
+    assert al.set_index("Nombre").loc["XCCY_FUERA_RANGO", "Severidad"] == "MEDIA"
+    out, _, al = convertir(_pos(**hed), {}, {}, {}, {})                    # sin curvas de drop: queda la yield del papel
+    assert out["Conversion"].iloc[0] == "" and abs(out["Yield"].iloc[0] - 0.246309) < 1e-12 and "SIN_CONVERSION_HEDGE" in set(al["Nombre"])
+
+
+def test_indice_rate_sin_curva_queda_nominal_del_proveedor():
+    # IMED LOAN CHIBPROM + 4,60 % (EXCEPCIONES, MRCLP): la TD del PM ya trae el cupón all-in → nominal CLP, sin breakeven
+    p = _pos(Fuente="EXCEPCIONES", Indice="CHIBPROM", Risk_Currency="CLP", Yield_Moneda="CLP", Yield=0.104268, Duration=3.2)
+    out, det, al = convertir(p, {}, {}, {}, {})
+    assert out["Conversion"].iloc[0] == "PROVEEDOR_NOMINAL" and abs(out["Yield"].iloc[0] - 0.104268) < 1e-12
+    assert det["Resultado"].iloc[0] == "PROVEEDOR_NOMINAL"
+    assert set(al["Nombre"]) == {"INDICE_SIN_CURVA"} and al["Severidad"].iloc[0] == "INFO"
+    p = _pos(Fuente="EXCEPCIONES", Indice="CPI", Risk_Currency="USD", Yield_Moneda="USD", Yield=0.184322, Duration=3.2)
+    out, det, al = convertir(p, {}, {}, {}, {})                            # CPI (real en USD) sigue sin curvas → ALTA
+    assert "SIN_BREAKEVEN" in set(al["Nombre"]) and det["Resultado"].iloc[0] == "SIN_CURVAS:CPI"

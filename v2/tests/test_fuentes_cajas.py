@@ -36,3 +36,14 @@ def test_sin_regla_y_sin_nivel(tmp_path):
     assert abs(c.loc["1248-1", "Yield"] - (-0.02)) < 1e-12               # sin nivel del índice: solo spread + alerta
     assert c.loc["zzz-1", "Yield"] == 0 and c.loc["zzz-1", "Valido"]
     assert {"CAJA_SIN_REGLA", "INDICE_SIN_NIVEL"} <= set(al["Nombre"])
+
+
+def test_caja_sin_regla_se_calla_si_otra_fuente_resolvio():
+    from reporteria.fuentes.cajas import depurar_sin_regla
+    from reporteria import alertas
+    al = alertas.juntar(alertas.emitir("CAJA_SIN_REGLA", "ALTA", pd.DataFrame([_pos("dap-39"), _pos("caja-39")])),
+                        alertas.emitir("INDICE_SIN_NIVEL", "ALTA", pd.DataFrame([_pos("dap-39")])))
+    pos = pd.DataFrame([{**_pos("dap-39"), "Fuente": "RA", "Origen": "NEMO"},          # el DAP lo resolvió RA
+                        {**_pos("caja-39"), "Fuente": "CAJA", "Origen": "SIN_REGLA"}])  # la caja sigue a yield 0
+    out = depurar_sin_regla(al, pos)
+    assert list(out["Nombre"]) == ["CAJA_SIN_REGLA", "INDICE_SIN_NIVEL"] and out["PK2"].iloc[0] == "caja-39"

@@ -19,7 +19,7 @@ from .fx import armar_fx
 from .indices import asignar_indice
 from .config import Rutas
 from .fuentes.bbg_yas import candidatos_bbg
-from .fuentes.cajas import candidatos_cajas
+from .fuentes.cajas import candidatos_cajas, depurar_sin_regla
 from .fuentes.cshf import candidatos_cshf
 from .fuentes.jsonl import candidatos_jsonl
 from .fuentes.excepciones import candidatos_excepciones
@@ -202,7 +202,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     jpm = _opcional("JPM", rutas.jpm, leer_jpm, log, al)
     c, a = candidatos_jpm(pos, jpm); cands.append(c); al.append(a)
     ra = _opcional("RA_TIR", rutas.ra, lambda p: leer_ra(p, str(reglas.parametros.get("hoja_ra", "")) or hoja_ra(rutas.fecha)), log, al)
-    c, a = candidatos_ra(pos, ra); cands.append(c); al.append(a)
+    c, a = candidatos_ra(pos, ra, reglas.parametros); cands.append(c); al.append(a)
     cand = pd.concat([x for x in cands if len(x)], ignore_index=True) if any(len(x) for x in cands) else cands[0]
     cand, a = cascada.validar_candidatos(cand, reglas.parametros); al.append(a)
 
@@ -256,7 +256,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         errores = getattr(bbg, "inner", bbg).errores
         log.error("Bloomberg no respondió (%s): lo pendiente de BBG/CSHF queda FALTANTE y las curvas de drop vacías", errores[0])
         al.append(alertas.emitir("BBG_SIN_CONEXION", "CRITICA", detalle=f"terminal sin sesión/API en la estación: {errores[0]}", ambito="CORRIDA"))
-    estructurales = alertas.ajustar_estructurales(alertas.juntar(*al), reglas.alertas)
+    estructurales = alertas.ajustar_estructurales(depurar_sin_regla(alertas.juntar(*al), pos), reglas.alertas)
     todas = alertas.juntar(estructurales, al_reglas)
     alertas_resumen = pd.concat([res_reglas, alertas.resumen_estructurales(estructurales, pos)], ignore_index=True)
     log.info("alertas: %s", {k: int(v) for k, v in todas["Severidad"].value_counts().items()} if len(todas) else {})

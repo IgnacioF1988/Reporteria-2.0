@@ -48,7 +48,8 @@ Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input oblig
 | Papel indexado (UF, UDI, UVR, IPCA, UI, BONCER, VAC) | breakeven al plazo de la duration: `ajuste = (1+r_nom)/(1+r_real) − 1`, `Yield = (1+y_real)(1+ajuste) − 1`; la Modified se reexpresa `Mac/(1+y_local)` (el legacy la dejaba igual) | `Conversion=BREAKEVEN`, `Yield_Papel`, `Duration_Papel` |
 | Flotante con TD propia (CDI, TIIE desde EXCEPCIONES/CSHF/JSONL) | se compone el spread con el nivel spot del índice (aprox.; ver FUTURO) | `Conversion=SUMA_INDICE` |
 | Flotante de proveedor | no se toca; se asume nominal local (alerta INFO `FLOTANTE_PROVEEDOR`) | `PROVEEDOR_NOMINAL` |
-| Papel USD hedgeado (`Hedge_Currency`) | `politica_hedge`: `XCCY_SI_EXISTE` usa el swap de mercado (`Yield_XCCY`) y si no el drop propio (`Yield_Drop = y_usd + local + basis − usd` con curvas `CURVE_TENOR_RATES`); `DROP_SIEMPRE` usa el drop. Siempre se calculan ambos y `Dif_XCCY_Drop_bps` alerta sobre `xccy_drop_max_bps` | `Conversion=XCCY/DROP`, `Yield_Drop`, `Dif_XCCY_Drop_bps` |
+| Flotante con índice sin curva (TAB30, CHIBPROM) | la TD del PM ya trae el cupón all-in: queda nominal local (alerta INFO `INDICE_SIN_CURVA`) | `PROVEEDOR_NOMINAL` |
+| Papel USD hedgeado (`Hedge_Currency`) | `politica_hedge`: `XCCY_SI_EXISTE` usa el swap de mercado (`Yield_XCCY`) y si no el drop propio (`Yield_Drop = y_usd + local + basis − usd` con curvas `CURVE_TENOR_RATES`); `DROP_SIEMPRE` usa el drop. Siempre se calculan ambos y `Dif_XCCY_Drop_bps` alerta sobre `xccy_drop_max_bps`. Un XCCY fuera de `yield_min/max_proveedor` se ignora (`XCCY_FUERA_RANGO`) | `Conversion=XCCY/DROP`, `Yield_Drop`, `Dif_XCCY_Drop_bps` |
 | Override de valor (`REGLAS/overrides_valor`) | pisa todo al final, con vigencia; `Fuente=OVERRIDE` | `Conversion=OVERRIDE` |
 
 El índice de cada papel (`Indice`, `Indice_Origen`) sale de: override del operador → moneda que lo declara (CLF, UDI, UVR COSTER,
@@ -87,12 +88,12 @@ Las tablas `BD_FX_Exposure_{FONDO}.xlsx` agregan `FX_Exposure` para los fondos q
 | `fondos` | `ID_Fund, Politica_Hedge` (`A_CLP`, `POR_PAIS` o vacío). |
 | `buckets` | `Bucket, Tratamiento, Orden`: qué se hace con cada bucket. Tratamiento: `CASCADA` busca métrica en proveedores; `CAJA` índice + spread; `FACTURA` RPT de Facts; `CERO` yield 0; `EXCLUIR`. |
 | `clasificacion` | Excepciones a la tabla corporativa: `ID, ID_Fund, Criterio (PK2 / ID_Instrumento / BalSheetKey / Nombre_Regex / Issue_Type_Code / Investment_Type_Code), Valor, Bucket y/o Tratamiento`. Regla por fondo gana a global; criterio más específico gana. Ej.: en MRCLP los depósitos son caja; `Issue_Type_Code = 5` → `FACTURA`. |
-| `cajas` | `ID_Fund, PK2, Indice_Referencia (ticker BBG o N.A.), Spread_Anual (decimal), Dias`. Yield = nivel del índice al cierre + spread; Duration = Dias/365. Sin fila → yield 0 + alerta `CAJA_SIN_REGLA`. Migrado de `Template_Cajas`. |
+| `cajas` | `ID_Fund, PK2, Indice_Referencia (ticker BBG o N.A.), Spread_Anual (decimal), Dias`. Yield = nivel del índice al cierre + spread; Duration = Dias/365. Sin fila → yield 0 + alerta `CAJA_SIN_REGLA` (solo si ninguna otra fuente, p. ej. RA para un DAP, la resolvió). Migrado de `Template_Cajas`. |
 | `defaulteados` | `ID_Fund, ID_Instrumento, Estado (DEF / PROPDEF), Fecha_Desde, Fecha_Fin`. Se suma al `DEFAULTED.xlsx` corporativo (DEF vigente en todos los fondos). Ambos → Yield 0, Duration 0.5. |
 | `overrides_valor` | `ID_Fund, ID_Instrumento, SubID_Instrumento, Yield, Duration, Fecha_Desde, Fecha_Fin`. Pisa todo. |
 | `overrides_atributo` | Mismo esquema que `EXCEPCIONES.xlsx` corporativo: `ID_Fund, ID_Instrumento, SubID_Instrumento, Field, Value, Fecha_Desde, Fecha_Fin`. |
 | `alertas` | Reglas del motor de alertas (campo, operador, umbral, severidad). |
-| `parametros` | Umbrales globales (`yield_max_proveedor`, `factura_tolerancia_monto`, `yield_type_default`, …). |
+| `parametros` | Umbrales globales (`yield_max_proveedor`, `factura_tolerancia_monto`, `yield_type_default`, `ra_unico_factor` = 12: RA entrega los depósitos con TIR base 30 días, …). |
 
 ## Alertas (REGLAS/alertas)
 Cada fila es `Campo Operador Umbral` sobre una columna de `cartera_final` o una derivada. Operadores: `>= <= > < igual distinto
@@ -108,8 +109,8 @@ Derivadas disponibles: `Delta_Yield`, `Delta_Yield_bps`, `Delta_Duration`, `Delt
 
 Alertas estructurales (las emite el pipeline, no se configuran): CUBO_DUPLICADO, SIN_MAESTRO, SIN_FONDO, SIN_REGLA, REGLA_AMBIGUA,
 HEDGE_*, OVERRIDE_SIN_POSICION, CAJA_SIN_REGLA, CAJA_SIN_VALOR, INDICE_SIN_NIVEL, FACTURA_*, PK2_DUPLICADO, ESCALA_FALLBACK,
-PROVEEDOR_INVALIDO, FAMILIA_INFERIDA, YIELD_TYPE_DEFAULT, AI_SOSPECHOSO, FALTANTE, INSUMO_FALTANTE, FX_SIN_BEEMINING,
-SIN_BREAKEVEN, SIN_CONVERSION_HEDGE, XCCY_VS_DROP, CURVA_EXTRAPOLADA, INDICE_NUEVO, MONEDA_SIN_CURVAS_DROP, CURVA_SIN_DATOS,
+PROVEEDOR_INVALIDO, FAMILIA_INFERIDA, YIELD_TYPE_DEFAULT, AI_SOSPECHOSO, RA_TIR_MENSUAL, FALTANTE, INSUMO_FALTANTE, FX_SIN_BEEMINING,
+SIN_BREAKEVEN, SIN_CONVERSION_HEDGE, XCCY_VS_DROP, XCCY_FUERA_RANGO, INDICE_SIN_CURVA, CURVA_EXTRAPOLADA, INDICE_NUEVO, MONEDA_SIN_CURVAS_DROP, CURVA_SIN_DATOS,
 AGREGADO_INCONSISTENTE.
 
 ## Agregados

@@ -53,3 +53,11 @@ def candidatos_cajas(pos: pd.DataFrame, reglas: pd.DataFrame, bbg: Bloomberg, fe
         alertas.emitir("INDICE_SIN_NIVEL", "ALTA", pd.DataFrame(sin_nivel), "índice de referencia sin nivel en Bloomberg/caché: se usa solo el spread", valor="Valor") if sin_nivel else None,
     )
     return pd.DataFrame(filas), al
+
+
+def depurar_sin_regla(al: pd.DataFrame, pos: pd.DataFrame) -> pd.DataFrame:
+    """Tras `cascada.elegir`: CAJA_SIN_REGLA solo si ganó el candidato sin regla (si EXCEPCIONES/RA/JPM resolvieron, se calla)."""
+    if al is None or al.empty or "Origen" not in pos.columns:
+        return al if al is not None else alertas.vacias()
+    origen = al["Pos_ID"].map(pos.set_index("Pos_ID")["Origen"])
+    return al[~(al["Nombre"].eq("CAJA_SIN_REGLA") & origen.ne("SIN_REGLA"))].reset_index(drop=True)
