@@ -94,7 +94,7 @@ Las tablas `BD_FX_Exposure_{FONDO}.xlsx` agregan `FX_Exposure` para los fondos q
 | `overrides_valor` | `ID_Fund, ID_Instrumento, SubID_Instrumento, Yield, Duration, Fecha_Desde, Fecha_Fin`. Pisa todo. |
 | `overrides_atributo` | Mismo esquema que `EXCEPCIONES.xlsx` corporativo: `ID_Fund, ID_Instrumento, SubID_Instrumento, Field, Value, Fecha_Desde, Fecha_Fin`. |
 | `alertas` | Reglas del motor de alertas (campo, operador, umbral, severidad). |
-| `parametros` | Umbrales globales (`yield_max_proveedor`, `factura_tolerancia_monto`, `yield_type_default`, `ra_unico_factor` = 12: RA entrega los depósitos con TIR base 30 días, `yield_def` = 0 y `duracion_def` = 0.5 para DEF/PROPDEF, …). |
+| `parametros` | Umbrales globales (`yield_max_proveedor`, `factura_tolerancia_monto`, `yield_type_default`, `ra_unico_factor` = 12: RA entrega los depósitos con TIR base 30 días, `yield_def` = 0 y `duracion_def` = 0.5 para DEF/PROPDEF, `factura_morosa_duration` = 0, …). |
 
 ## Alertas (REGLAS/alertas)
 Cada fila es `Campo Operador Umbral` sobre una columna de `cartera_final` o una derivada. Operadores: `>= <= > < igual distinto
@@ -131,14 +131,17 @@ sobre cuántas posiciones) · `insumos`. Más `resumen_corrida_{FECHA}.json`.
 Fuente principal: la base de Facts (`bi_facturas`, `bi_prorrogas`, `bi_cambios`) por túnel SSH + Postgres
 (`adaptadores/facts.py`). La corrida baja las tres tablas completas y deja `04_CACHE/{FECHA}/facts_*.csv`; `--sin-facts` usa
 solo la caché. Si no hay caché ni conexión se lee el RPT en Excel (`FACTURAS_{FECHA}.xlsx` en MERCADO) y, si tampoco,
-`INSUMO_FALTANTE`. Cruce `nemotecnico → HOMOL_INSTRUMENTOS (GENEVA) → ID_Instrumento` y `fondo → HOMOL_FUNDS / BD_FUNDS →
-ID_Fund`. Yield = `tasa_mensual × 12` (decimal, base 30 días), Duration = días al vencimiento vigente / 365.
+`INSUMO_FALTANTE`. Cruce: el número del nombre en el CUBO (`FACRCPP59397`, `FACPP59397`, `FAC68135`) es el
+`documento_operacion_id` de Facts y manda (Geneva antepone `RC` en MRCLP, así que el nemotécnico de Facts no está en HOMOL);
+respaldo `nemotecnico → HOMOL_INSTRUMENTOS (GENEVA) → ID_Instrumento`; `fondo → HOMOL_FUNDS / BD_FUNDS → ID_Fund`.
+Yield = `tasa_mensual × 12` (decimal, base 30 días), Duration = días al vencimiento vigente / 365. Morosa (vencida y no
+pagada al cierre): tasa × 12 y duration `factura_morosa_duration` (0), alerta INFO `FACTURA_MOROSA`.
 
 Estado **al cierre** (`lectura/facts.facturas_al_cierre`): la base está viva, así que se revierten con `bi_cambios` los cambios
 de tasa, vencimiento y monto posteriores al cierre (`FACTURA_ASOF_REVERTIDA`, INFO); una factura pagada después del cierre
 sigue viva al cierre (viva = sin `fecha_pago` o pagada después); si hay prórroga iniciada al cierre o antes, mandan su tasa y
 su vencimiento (`tasa_origen=PRORROGA`, alerta INFO `FACTURA_TASA_PRORROGA`; el RPT usa la tasa original). `monto_compra` ≠
-TotalMVal → `FACTURA_MONTO_DISTINTO`. Conexión: `MONEDA_BI_PASSWORD` y `MONEDA_BI_SSH_KEY` en `.env` (nunca en git); host y
+cantidad del CUBO (nominal; el MV va a precio con devengo) → `FACTURA_MONTO_DISTINTO`. Conexión: `MONEDA_BI_PASSWORD` y `MONEDA_BI_SSH_KEY` en `.env` (nunca en git); host y
 usuarios `FACTS_*` con los valores del proveedor en `.env.example`; `pip install -e .[facts]`; `reporteria facts-probar`
 abre el túnel y cuenta filas sin correr el cierre.
 

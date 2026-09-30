@@ -215,7 +215,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         mapa_fondos.update({str(k).upper(): int(v) for k, v in zip(homol_funds["Portfolio"], homol_funds["ID_Fund"])})
     c, a = candidatos_facturas(
         pos, rpt, dict(zip(homol["SourceInvestment"], homol["ID_Instrumento"])) if homol is not None else {},
-        mapa_fondos, rutas.settle, reglas.parametros.get("factura_tolerancia_monto", 0.01))
+        mapa_fondos, rutas.settle, reglas.parametros.get("factura_tolerancia_monto", 0.01), reglas.parametros)
     cands.append(c); al.append(a)
     # ── Fuentes de archivo para la cascada: EXCEPCIONES (PM), JPM, RA ──
     try:

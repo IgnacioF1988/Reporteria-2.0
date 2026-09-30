@@ -50,7 +50,7 @@ def main():
         "estado": ["vigente"] * n,
         "fecha_inversion": SETTLE - pd.Timedelta(days=20),
         "moneda": "CLP",
-        "monto_compra": fac["TotalMVal"].round(0),
+        "monto_compra": fac["Qty"].round(0),          # Facts: monto_compra = nominal comprado (el MV va a precio con devengo)
         "fecha_vencimiento_original": [SETTLE + pd.Timedelta(days=30 + (i % 60)) for i in range(n)],
         "fecha_vencimiento": [SETTLE + pd.Timedelta(days=30 + (i % 60)) for i in range(n)],
         "fecha_pago": pd.NaT,
@@ -113,7 +113,7 @@ def main():
     ], columns=["ID", "Nombre", "Campo", "Operador", "Umbral", "Severidad", "ID_Fund", "Activa", "Requiere_Anterior", "Ambito", "Descripcion"])
     params = pd.DataFrame([("yield_max_proveedor", 1.0, "Yield máxima aceptada de un proveedor (decimal)"),
                            ("yield_min_proveedor", -0.5, "Yield mínima aceptada"),
-                           ("factura_tolerancia_monto", 0.01, "Diferencia relativa monto_compra vs TotalMVal que alerta"),
+                           ("factura_tolerancia_monto", 0.01, "Diferencia relativa monto_compra vs cantidad (nominal) que alerta"),
                            ("yield_type_default", 15, "Yield_Type cuando el maestro trae 0 o vacío (15 = YTW)"),
                            ("politica_hedge", "XCCY_SI_EXISTE", "Hedgeados: XCCY_SI_EXISTE (swap de mercado, si no drop propio) o DROP_SIEMPRE"),
                            ("xccy_drop_max_bps", 50, "Alerta XCCY_VS_DROP cuando |XCCY − drop propio| supera estos bps"),

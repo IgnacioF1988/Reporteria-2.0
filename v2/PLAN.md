@@ -233,6 +233,9 @@ Resolución de fondo: `Fund_Name`/`Fondo` (upper) contra `BD_FUNDS.FundShortName
 - `test_fuentes_facturas.py`: frame de Facts → `origen FACTS:`, alerta `FACTURA_TASA_PRORROGA`; regla de viva con `fecha_pago > settle`.
 - `test_cli.py`: `check` imprime líneas de facts; `correr --sin-facts` con caché mini resuelve las facturas del CUBO mini; `test_golden_h5` sigue verde (con caché mini las 302 facturas del mini pasan a RESUELTO: se actualiza el golden y se documenta).
 
+### Corrida real (30-09, commit fcd7724) y ajustes
+Facts bajó 53.517 facturas / 100 prórrogas / 239.563 cambios; 3.433 vivas al cierre; RESUELTO 6.306, FALTANTE 891 (730 facturas). Causas y arreglos: (1) MRCLP 0 de 473: Geneva nombra `FACRC{tipo}{doc}` y Facts `FAC{tipo}{doc}` → cruce por `documento_operacion_id` = número del nombre (manda), HOMOL de respaldo; (2) 185 morosas en MCPPP (vencidas y no pagadas) → tasa × 12 y duration `factura_morosa_duration` (0), INFO `FACTURA_MOROSA`; (3) 332 `FACTURA_MONTO_DISTINTO` falsas (−1 % a −4,7 %: el MV va a precio 101 con devengo) → comparar contra `Qty` (nominal).
+
 ### Verificación
 `pytest -q` verde · `python -m reporteria.cli check --fecha 20260731` muestra las líneas de Facts · en la estación: `pip install -e .[facts]`, `.env` con `MONEDA_BI_PASSWORD` y llave, `facts-probar --fecha 20260731` cuenta filas · `correr --fecha 20260731` baja las tablas y deja `04_CACHE/20260731/facts_*.csv`; `resumen`: las 3.540 facturas pasan de FALTANTE a RESUELTO con `Fuente=FACTURA`, cobertura MRCLP sube · `correr --sin-facts` reproduce idéntico (`comparar` → 0 diferencias).
 

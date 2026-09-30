@@ -55,3 +55,21 @@ def test_frame_de_facts_origen_tasa_prorroga_y_viva_por_fecha_pago():
     assert c.loc["102-39", "Valido"]                                   # pagada después del cierre: viva al cierre
     assert not c.loc["103-39", "Valido"] and c.loc["103-39", "Motivo_Descarte"] == "SIN_FACTURA"
     assert (al["Nombre"] == "FACTURA_TASA_PRORROGA").sum() == 1 and (al["Nombre"] == "FACTURA_ASOF_REVERTIDA").sum() == 1
+
+
+def test_cruce_por_numero_de_operacion_morosa_y_monto_contra_qty():
+    # MRCLP: Geneva nombra FACRCPP59397 y Facts FACPP59397; el número es documento_operacion_id y manda sobre HOMOL
+    pos = pd.DataFrame([{**_pos("500-39", 500, mv=3_500_000.0), "Name_Instrumento": "FACRCPP59397", "Qty": 3_467_780.0},
+                        {**_pos("501-39", 501, mv=28_532_933.0), "Name_Instrumento": "FACRC68135", "Qty": 28_152_558.0},
+                        {**_pos("502-39", 502, mv=1000.0), "Name_Instrumento": "FACRCGP1", "Qty": 1000.0}])
+    rpt = pd.DataFrame([_rpt(documento_operacion_id=59397, nemotecnico="FACPP59397", monto_compra=3_467_780.0, tasa_origen="ORIGINAL", cambios_revertidos=0),
+                        _rpt(documento_operacion_id=68135, nemotecnico="FAC68135", monto_compra=28_152_558.0, tasa_mensual=0.007,
+                             fecha_vencimiento=SETTLE - pd.Timedelta(days=20), tasa_origen="ORIGINAL", cambios_revertidos=0)])
+    cand, al = candidatos_facturas(pos, rpt, {}, FONDOS, SETTLE, tolerancia_monto=0.01, parametros={})
+    c = cand.set_index("PK2")
+    assert c.loc["500-39", "Valido"] and c.loc["500-39", "Origen"] == "FACTS:FACPP59397" and abs(c.loc["500-39", "Yield"] - 0.096) < 1e-12
+    assert c.loc["501-39", "Valido"] and abs(c.loc["501-39", "Yield"] - 0.084) < 1e-12 and c.loc["501-39", "Duration"] == 0   # morosa
+    assert "morosa" in c.loc["501-39", "Detalle"] and not c.loc["502-39", "Valido"] and c.loc["502-39", "Motivo_Descarte"] == "SIN_FACTURA"
+    assert (al["Nombre"] == "FACTURA_MOROSA").sum() == 1 and not (al["Nombre"] == "FACTURA_MONTO_DISTINTO").any()   # monto vs Qty, no vs MV
+    cand, _ = candidatos_facturas(pos, rpt, {}, FONDOS, SETTLE, parametros={"factura_morosa_duration": 0.25})
+    assert cand.set_index("PK2").loc["501-39", "Duration"] == 0.25
