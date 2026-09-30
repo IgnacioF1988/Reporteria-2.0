@@ -88,6 +88,36 @@ Las tablas `BD_FX_Exposure_{FONDO}.xlsx` agregan `FX_Exposure` para los fondos q
 | `alertas` | Reglas del motor de alertas (campo, operador, umbral, severidad). |
 | `parametros` | Umbrales globales (`yield_max_proveedor`, `factura_tolerancia_monto`, `yield_type_default`, …). |
 
+## Alertas (REGLAS/alertas)
+Cada fila es `Campo Operador Umbral` sobre una columna de `cartera_final` o una derivada. Operadores: `>= <= > < igual distinto
+abs>= abs> in es_nulo no_nulo es_verdadero es_falso` (en Excel `==` se vuelve fórmula: se escribe `igual`). `Umbral` acepta
+número, texto, `param:<clave>` de `parametros` o lista `a;b;c` para `in`. Dos filas con el mismo Nombre: la que trae `ID_Fund`
+manda sobre la global para ese fondo (A01 usa 25 % general y 40 % en MLDL). `Requiere_Anterior=SI` sin cierre previo → la
+regla queda INACTIVA y se informa en `alertas_resumen`. `Ambito=FONDO` emite una alerta por fondo (A09 cobertura). Una fila
+**sin Campo** ajusta una alerta estructural del pipeline con ese Nombre: `Activa=NO` la silencia, `Severidad` la reclasifica.
+
+Derivadas disponibles: `Delta_Yield`, `Delta_Yield_bps`, `Delta_Duration`, `Delta_Precio`, `Metricas_Iguales_Ant`,
+`Precio_Sube_Yield_Sube`, `Es_Nueva` (requieren cierre anterior); `Es_Default`, `AI_Positivo`, `Default_Con_AI`, `Es_Bono`,
+`Bono_Sin_AI`, `Falta_Con_MV`, `Resuelta`, `MV_Abs`, `Cobertura_MV_Fondo`.
+
+Alertas estructurales (las emite el pipeline, no se configuran): CUBO_DUPLICADO, SIN_MAESTRO, SIN_FONDO, SIN_REGLA, REGLA_AMBIGUA,
+HEDGE_*, OVERRIDE_SIN_POSICION, CAJA_SIN_REGLA, CAJA_SIN_VALOR, INDICE_SIN_NIVEL, FACTURA_*, PK2_DUPLICADO, ESCALA_FALLBACK,
+PROVEEDOR_INVALIDO, FAMILIA_INFERIDA, YIELD_TYPE_DEFAULT, AI_SOSPECHOSO, FALTANTE, INSUMO_FALTANTE, FX_SIN_BEEMINING,
+SIN_BREAKEVEN, SIN_CONVERSION_HEDGE, XCCY_VS_DROP, CURVA_EXTRAPOLADA, INDICE_NUEVO, MONEDA_SIN_CURVAS_DROP, CURVA_SIN_DATOS,
+AGREGADO_INCONSISTENTE.
+
+## Agregados
+Por fondo y nivel **ACTIVOS**, **PASIVOS** (|MV|) y **PATRIMONIO** (A − P, con MV con signo): `AW = Σ(y·MV)/ΣMV`,
+`DW = Σ(y·MV·D)/Σ(MV·D)`, `Duration_AW`, `Cobertura` (MV con métrica / MV). Todo lo sin métrica entra a yield 0 y duration 0;
+los excluidos no entran. Se abre por Bucket, Ficha_FI, FX_Exposure, Risk_Country, Risk_Currency, Fuente y Conversion.
+La corrida verifica `MV_PAT = MV_ACT − MV_PAS` y que los pesos sumen 1 (alerta CRÍTICA `AGREGADO_INCONSISTENTE` si no).
+
+## Excel del cierre (`REPORTE_{FECHA}.xlsx`)
+`resumen` · `agregados` · `alertas_resumen` (una fila por regla con Estado y MV afectado) · `alertas` · `faltantes` ·
+`plantilla_overrides` (los faltantes ya en el formato de `REGLAS/overrides_valor`: completar Yield/Duration y pegar) ·
+`cartera_final` · `candidatos` · `conversiones` · `curvas_drop` · `td_detalle` · `reglas_aplicadas` (qué fila de REGLAS actuó y
+sobre cuántas posiciones) · `insumos`. Más `resumen_corrida_{FECHA}.json`.
+
 ## Facturas
 Se lee la hoja `Facturas` del RPT de Facts (`FACTURAS_{FECHA}.xlsx` en MERCADO). Cruce `nemotecnico → HOMOL_INSTRUMENTOS
 (GENEVA) → ID_Instrumento` y `fondo → HOMOL_FUNDS / BD_FUNDS → ID_Fund`. Se excluyen las pagadas. Yield =

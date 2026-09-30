@@ -35,5 +35,5 @@ def escribir_excel(hojas: dict[str, pd.DataFrame], path: Path) -> Path:
     with pd.ExcelWriter(path, engine="openpyxl") as w:
         for nombre, df in hojas.items():
             (df if len(df) else pd.DataFrame({"info": ["sin filas"]})).to_excel(w, sheet_name=nombre[:31], index=False)
-            _formatear(w.sheets[nombre[:31]], {"Yield", "Yield_Local", "Yield_Drop", "Yield_Papel", "Yield_XCCY", "AW", "DW"})
+            _formatear(w.sheets[nombre[:31]], {"Yield", "Yield_Local", "Yield_Drop", "Yield_Papel", "Yield_XCCY", "AW", "DW", "Peso_MV", "Cobertura"})
     return path

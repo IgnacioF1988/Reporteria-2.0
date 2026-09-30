@@ -100,14 +100,33 @@ def main():
                                    "Fecha_Desde", "Fecha_Fin", "Fuente", "Comentario"])
     ov_att = pd.DataFrame(columns=["ID_Fund", "ID_Instrumento", "SubID_Instrumento", "Field", "Value",
                                    "Fecha_Desde", "Fecha_Fin", "Comentario"])
-    alertas = pd.DataFrame(columns=["ID", "Nombre", "Campo", "Operador", "Umbral", "Severidad", "ID_Fund",
-                                    "Activa", "Requiere_Anterior", "Ambito", "Descripcion"])
+    # Semilla del motor de alertas: F1–F7 del legacy + cobertura + revisión de hedgeados. Campo vacío = ajuste de una estructural.
+    alertas = pd.DataFrame([
+        ("A01", "YIELD_ALTA", "Yield", ">=", "param:yield_alta_default", "CRITICA", None, "SI", "NO", "POSICION", "Yield final sobre el umbral general"),
+        ("A01", "YIELD_ALTA", "Yield", ">=", "param:yield_alta_local", "CRITICA", 17, "SI", "NO", "POSICION", "MLDL: monedas locales, umbral más alto"),
+        ("A02", "YIELD_NEGATIVA", "Yield", "<", 0, "ALTA", None, "SI", "NO", "POSICION", "Yield final negativa"),
+        ("A03", "DEFAULT_CON_AI", "Default_Con_AI", "es_verdadero", "", "ALTA", None, "SI", "NO", "POSICION", "Default con devengo positivo"),
+        ("A04", "BONO_SIN_AI", "Bono_Sin_AI", "es_verdadero", "", "MEDIA", None, "SI", "NO", "POSICION", "Bono no default con AI = 0 (¿cupón cero, recién pagó o default no marcado?)"),
+        ("A05", "PRECIO_Y_YIELD_SUBEN", "Precio_Sube_Yield_Sube", "es_verdadero", "", "CRITICA", None, "SI", "SI", "POSICION", "Precio y yield suben a la vez vs cierre anterior"),
+        ("A06", "METRICAS_SIN_ACTUALIZAR", "Metricas_Iguales_Ant", "es_verdadero", "", "MEDIA", None, "SI", "SI", "POSICION", "Yield y duration idénticas al cierre anterior"),
+        ("A07", "DELTA_YIELD", "Delta_Yield", "abs>=", "param:delta_yield_max", "ALTA", None, "SI", "SI", "POSICION", "Cambio de yield vs cierre anterior sobre el umbral"),
+        ("A09", "COBERTURA_BAJA", "Cobertura_MV_Fondo", "<", "param:cobertura_min_mv", "ALTA", None, "SI", "NO", "FONDO", "MV de activos con métrica bajo el mínimo del fondo"),
+        ("A16", "FALTANTE_CON_MV", "Falta_Con_MV", "es_verdadero", "", "ALTA", None, "NO", "NO", "POSICION", "Duplicaría la estructural FALTANTE; se deja como ejemplo"),
+        ("A22", "HEDGE_CONVERTIDO", "Conversion", "in", "XCCY;DROP", "INFO", None, "NO", "NO", "POSICION", "Ejemplo de operador in (desactivada)"),
+        ("A23", "SIN_TRATAMIENTO", "Tratamiento", "igual", "SIN_REGLA", "INFO", None, "NO", "NO", "POSICION", "Ejemplo: en Excel '==' se vuelve fórmula, se escribe igual"),
+        ("E01", "PROVEEDOR_INVALIDO", "", "", "", "MEDIA", None, "SI", "NO", "POSICION", "Ajuste de estructural: baja de ALTA a MEDIA"),
+        ("E02", "YIELD_TYPE_DEFAULT", "", "", "", "INFO", None, "NO", "NO", "POSICION", "Ajuste de estructural: silenciada"),
+    ], columns=["ID", "Nombre", "Campo", "Operador", "Umbral", "Severidad", "ID_Fund", "Activa", "Requiere_Anterior", "Ambito", "Descripcion"])
     params = pd.DataFrame([("yield_max_proveedor", 1.0, "Yield máxima aceptada de un proveedor (decimal)"),
                            ("yield_min_proveedor", -0.5, "Yield mínima aceptada"),
                            ("factura_tolerancia_monto", 0.01, "Diferencia relativa monto_compra vs TotalMVal que alerta"),
                            ("yield_type_default", 15, "Yield_Type cuando el maestro trae 0 o vacío (15 = YTW)"),
                            ("politica_hedge", "XCCY_SI_EXISTE", "Hedgeados: XCCY_SI_EXISTE (swap de mercado, si no drop propio) o DROP_SIEMPRE"),
-                           ("xccy_drop_max_bps", 50, "Alerta XCCY_VS_DROP cuando |XCCY − drop propio| supera estos bps")],
+                           ("xccy_drop_max_bps", 50, "Alerta XCCY_VS_DROP cuando |XCCY − drop propio| supera estos bps"),
+                           ("yield_alta_default", 0.25, "A01: yield final sobre este valor es CRÍTICA"),
+                           ("yield_alta_local", 0.40, "A01 en fondos de moneda local (MLDL)"),
+                           ("delta_yield_max", 0.10, "A07: |Δ yield| vs cierre anterior (10 pp)"),
+                           ("cobertura_min_mv", 0.95, "A09: cobertura mínima de MV de activos con métrica por fondo")],
                           columns=["Clave", "Valor", "Descripcion"])
     # override de valor de ejemplo: DOCUFO (defaulteado de facto, BBG devuelve duration 0) en el fondo 16 → yield 12 %, duration 1
     ov_val = pd.DataFrame([(16, 168617, 1, 0.12, 1.0, None, None, "OPERADOR", "DOCUFO 10.25 07/24/2024 144A: reestructuración, valor acordado con PM")],

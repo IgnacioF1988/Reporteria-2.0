@@ -151,12 +151,40 @@ def _overrides_atributo(df, validos):
     return _fechas(df).reset_index(drop=True)
 
 
+OPERADORES = (">=", "<=", ">", "<", "==", "!=", "abs>=", "abs>", "in", "es_nulo", "no_nulo", "es_verdadero", "es_falso")
+SEVERIDADES = ("CRITICA", "ALTA", "MEDIA", "INFO")
+AMBITOS = ("POSICION", "FONDO", "CORRIDA")
+
+
+def _si_no(df, col, hoja, default="NO"):
+    s = limpiar_txt(df[col]).str.upper().replace({"": default, "SÍ": "SI", "YES": "SI", "TRUE": "SI", "FALSE": "NO"}) if col in df.columns \
+        else pd.Series(default, index=df.index)
+    if malos := sorted(set(s) - {"SI", "NO"}):
+        raise ValueError(f"REGLAS/{hoja}: {col} inválido {malos}; válidos ['SI', 'NO']")
+    return s.eq("SI")
+
+
 def _alertas(df, validos):
-    df = df.copy()
-    df.columns = [str(c).strip() for c in df.columns]
-    if "Nombre" in df.columns:
-        df = df[limpiar_txt(df["Nombre"]).ne("")].copy()
-        df["ID_Fund"] = _id_fund(df, "alertas", validos)
+    """Reglas del motor: Campo vacío = ajuste (severidad / Activa) de una alerta estructural del pipeline con ese Nombre."""
+    df = _cols(df, "alertas", ("Nombre", "Campo", "Operador", "Umbral", "Severidad"))
+    df = df[limpiar_txt(df["Nombre"]).ne("")].copy()
+    for c in ("Nombre", "Campo", "Operador", "Descripcion"):
+        df[c] = limpiar_txt(df[c]) if c in df.columns else ""
+    df["ID_Fund"] = _id_fund(df, "alertas", validos)
+    df["Severidad"] = _enum(df, "Severidad", SEVERIDADES, "alertas")
+    df["Ambito"] = limpiar_txt(df["Ambito"]).str.upper().replace({"": "POSICION"}) if "Ambito" in df.columns else "POSICION"
+    if malos := sorted(set(df["Ambito"]) - set(AMBITOS)):
+        raise ValueError(f"REGLAS/alertas: Ambito inválido {malos}; válidos {list(AMBITOS)}")
+    df["Activa"] = _si_no(df, "Activa", "alertas", "SI")
+    df["Requiere_Anterior"] = _si_no(df, "Requiere_Anterior", "alertas", "NO")
+    # "==" escrito en Excel se vuelve fórmula; se aceptan alias en texto
+    df["Operador"] = df["Operador"].str.lower().replace({"igual": "==", "eq": "==", "=": "==", "distinto": "!=", "ne": "!=", "abs>=": "abs>=", "abs>": "abs>"})
+    con_campo = df["Campo"].ne("")
+    if malos := sorted(set(df.loc[con_campo, "Operador"]) - set(OPERADORES)):
+        raise ValueError(f"REGLAS/alertas: Operador inválido {malos}; válidos {list(OPERADORES)}")
+    sin_umbral = con_campo & ~df["Operador"].isin(("es_nulo", "no_nulo", "es_verdadero", "es_falso")) & limpiar_txt(df["Umbral"]).eq("")
+    if sin_umbral.any():
+        raise ValueError(f"REGLAS/alertas: reglas sin Umbral {df.loc[sin_umbral, 'Nombre'].tolist()}")
     return df.reset_index(drop=True)
 
 

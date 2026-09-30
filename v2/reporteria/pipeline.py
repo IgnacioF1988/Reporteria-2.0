@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import alertas, cascada, clasificacion, overrides, salida, universo
+from . import agregados, alertas, cascada, clasificacion, overrides, salida, universo
 from .config import MAX_DIAS_ATRAS_PARIDADES, RISK_COUNTRY_TO_LOCAL_CCY, STRONG_CCY, SUFIJOS_SERIE
 from .adaptadores.bbg import Bloomberg, CacheBloomberg, FixtureBloomberg
 from .adaptadores.fx_sql import CacheFx, FixtureFx, FuenteFx
@@ -54,6 +54,9 @@ class Resultado:
     bbg_pedidos: list = field(default_factory=list)
     resumen: dict = field(default_factory=dict)
     excel: Path | None = None
+    agregados: pd.DataFrame = field(default_factory=pd.DataFrame)
+    alertas_resumen: pd.DataFrame = field(default_factory=pd.DataFrame)
+    hojas: dict = field(default_factory=dict)
 
 
 def _opcional(nombre, ruta, lector, log, al):
@@ -68,6 +71,29 @@ def _escala_cfg(par: dict) -> EscalaCfg:
     base = EscalaCfg()
     return EscalaCfg(umbral_pct=float(par.get("escala_umbral_pct", base.umbral_pct)), umbral_tc=float(par.get("escala_umbral_tc", base.umbral_tc)),
                      ratio_min=float(par.get("escala_ratio_min", base.ratio_min)), ratio_max=float(par.get("escala_ratio_max", base.ratio_max)))
+
+
+def _reglas_aplicadas(pos: pd.DataFrame, reglas) -> pd.DataFrame:
+    """Qué filas de REGLAS actuaron en la corrida y sobre cuántas posiciones (para auditar el manual)."""
+    filas = []
+    origen = pos["Bucket_Origen"].astype(str)
+    for _, r in reglas.clasificacion.iterrows():
+        n = int(origen.eq(f"REGLA:{r['ID']}").sum()) if "ID" in r else 0
+        filas.append(("clasificacion", r.get("ID", ""), f"{r['Criterio']}={r['Valor']} → {r.get('Bucket', '')}/{r.get('Tratamiento', '')}", n))
+    caja = pos[pos["Fuente"].eq("CAJA")]
+    for _, r in reglas.cajas.iterrows():
+        m = caja["PK2"].eq(str(r["PK2"])) & (caja["ID_Fund"].eq(int(r["ID_Fund"])) if pd.notna(r["ID_Fund"]) else True)
+        spread = f"{r['Spread_Anual']:+.4f}" if pd.notna(r["Spread_Anual"]) else "(sin spread)"
+        dias = f"{r['Dias']:.0f}d" if pd.notna(r["Dias"]) else "(sin días)"
+        filas.append(("cajas", "", f"{r['PK2']} fondo {r['ID_Fund']}: {r['Indice_Referencia'] or '(sin índice)'} {spread} / {dias}", int(m.sum())))
+    for _, r in reglas.defaulteados.iterrows():
+        filas.append(("defaulteados", "", f"{r['ID_Instrumento']} fondo {r['ID_Fund']} {r['Estado']}", int((pos["ID_Instrumento"].eq(r["ID_Instrumento"]) & pos["Estado_DEF"].ne("")).sum())))
+    for hoja, df, campo in (("overrides_valor", reglas.overrides_valor, "Yield"), ("overrides_atributo", reglas.overrides_atributo, None)):
+        for _, r in df.iterrows():
+            f = campo or r["Field"]
+            m = pos["ID_Instrumento"].eq(r["ID_Instrumento"]) & pos["Overrides"].astype(str).str.contains(f, regex=False)
+            filas.append((hoja, "", f"{r['ID_Instrumento']}-{r['SubID_Instrumento']} fondo {r['ID_Fund']}: {f}={r.get('Value', r.get('Yield', ''))}", int(m.sum())))
+    return pd.DataFrame(filas, columns=["Hoja", "ID", "Regla", "Posiciones"])
 
 
 def _cartera_anterior(rutas: Rutas, log) -> pd.DataFrame | None:
@@ -218,28 +244,66 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     log.info("conversiones: %s", conversiones["Resultado"].value_counts().to_dict() if len(conversiones) else {})
     pos, c, a = overrides.aplicar_valores(pos, reglas.overrides_valor, rutas.settle); al.append(a)
     cand = pd.concat([cand, c], ignore_index=True) if len(c) else cand
+
+    # ── H5: alertas por reglas, agregados y salida completa ──
+    pos = alertas.unir_anterior(pos, ant)
+    al_reglas, res_reglas = alertas.evaluar(pos, reglas.alertas, reglas.parametros, ant is not None)
+    estructurales = alertas.ajustar_estructurales(alertas.juntar(*al), reglas.alertas)
+    todas = alertas.juntar(estructurales, al_reglas)
+    alertas_resumen = pd.concat([res_reglas, alertas.resumen_estructurales(estructurales, pos)], ignore_index=True)
+    log.info("alertas: %s", {k: int(v) for k, v in todas["Severidad"].value_counts().items()} if len(todas) else {})
+    agg = agregados.aw_dw(pos)
+    inconsistencias = agregados.verificar(agg)
+    if len(inconsistencias):
+        al_inc = alertas.emitir("AGREGADO_INCONSISTENTE", "CRITICA", detalle="; ".join(inconsistencias["Problema"].astype(str)), ambito="CORRIDA")
+        todas = alertas.juntar(todas, al_inc)
+    faltantes = pos[pos["Estado"].eq("FALTANTE")]
+    plantilla = pd.DataFrame({
+        "ID_Fund": faltantes["ID_Fund"].values, "ID_Instrumento": faltantes["ID_Instrumento"].values,
+        "SubID_Instrumento": faltantes["SubID_Instrumento"].values, "Yield": float("nan"), "Duration": float("nan"),
+        "Fecha_Desde": rutas.settle.strftime("%Y-%m-%d"), "Fecha_Fin": "", "Fuente": "", "Comentario": "",
+        "_PK2": faltantes["PK2"].values, "_Nombre": faltantes["Name_Instrumento"].values, "_Bucket": faltantes["Bucket"].values,
+        "_Risk_Currency": faltantes["Risk_Currency"].values, "_TotalMVal": faltantes["TotalMVal"].values, "_Motivo": faltantes["Motivo"].values,
+    }).sort_values("_TotalMVal", key=lambda s: s.abs(), ascending=False)
+    insumos = pd.DataFrame([(k, str(v), "OK" if Path(v).exists() else "FALTA") for k, v in rutas.obligatorias().items()] +
+                           [(k, str(v) if v else "", "OK" if v and Path(v).exists() else "OPCIONAL_AUSENTE") for k, v in rutas.opcionales().items()],
+                           columns=["Insumo", "Ruta", "Estado"])
+    reglas_aplicadas = _reglas_aplicadas(pos, reglas)
     yld_flag = M.leer_yld_flag(rutas.bd_yld_flag) if Path(rutas.bd_yld_flag).exists() else {}
     pos["CalcType_exportable"] = pos["CalcType"].map(yld_flag).fillna(pos["CalcType"])
 
-    todas = alertas.juntar(*al)
-    resumen = {"fecha": rutas.fecha, "posiciones": len(pos), "fondos": sorted(int(x) for x in pos["ID_Fund"].unique()),
+    tot = agg[agg["Dimension"].eq("TOTAL")]
+    resumen = {"fecha": rutas.fecha, "fecha_ant": rutas.fecha_ant if ant is not None else None, "posiciones": len(pos),
+               "fondos": sorted(int(x) for x in pos["ID_Fund"].unique()),
                "estado": pos["Estado"].value_counts().to_dict(),
                "fuente": pos.loc[pos["Estado"].eq("RESUELTO"), "Fuente"].value_counts().to_dict(),
+               "conversion": pos.loc[pos["Conversion"].ne(""), "Conversion"].value_counts().to_dict(),
                "bucket": pos["Bucket"].value_counts().to_dict(),
+               "cobertura_mv_activos": {int(r["ID_Fund"]): round(float(r["Cobertura"]), 4) for _, r in tot[tot["Nivel"].eq("ACTIVOS")].iterrows()},
+               "aw_dw_patrimonio": {int(r["ID_Fund"]): [round(float(r["AW"]), 6), round(float(r["DW"]), 6) if pd.notna(r["DW"]) else None]
+                                    for _, r in tot[tot["Nivel"].eq("PATRIMONIO")].iterrows()},
                "alertas": {f"{s}|{n}": int(k) for (s, n), k in todas.groupby(["Severidad", "Nombre"]).size().items()} if len(todas) else {},
+               "alertas_inactivas": res_reglas.loc[~res_reglas["Estado"].eq("ACTIVA"), "Nombre"].tolist() if len(res_reglas) else [],
                "segundos": round(time.perf_counter() - t0, 1)}
     log.info("estado: %s | fuentes: %s", resumen["estado"], resumen["fuente"])
+    orden_sev = {"CRITICA": 0, "ALTA": 1, "MEDIA": 2, "INFO": 3}
     hojas = {
         "resumen": pd.DataFrame([(k, json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v) for k, v in resumen.items()],
                                 columns=["Concepto", "Valor"]),
+        "agregados": agg,
+        "alertas_resumen": alertas_resumen.sort_values("Severidad", key=lambda s: s.map(orden_sev)) if len(alertas_resumen) else alertas_resumen,
+        "alertas": todas.sort_values(["Severidad", "Nombre"], key=lambda s: s.map(orden_sev) if s.name == "Severidad" else s) if len(todas) else todas,
+        "faltantes": faltantes[[c for c in COLS_CARTERA if c in faltantes.columns]],
+        "plantilla_overrides": plantilla,
         "cartera_final": pos[[c for c in COLS_CARTERA if c in pos.columns]],
         "candidatos": cand,
-        "alertas": todas.sort_values(["Severidad", "Nombre"]) if len(todas) else todas,
         "conversiones": conversiones,
         "curvas_drop": tabla_curvas,
         "td_detalle": tds,
+        "reglas_aplicadas": reglas_aplicadas,
+        "insumos": insumos,
     }
     excel = salida.escribir_excel(hojas, rutas.excel_final)
     (rutas.outputs / f"resumen_corrida_{rutas.fecha}.json").write_text(json.dumps(resumen, ensure_ascii=False, indent=2, default=str))
     log.info("listo en %.1fs → %s", resumen["segundos"], excel)
-    return Resultado(pos, cand, todas, tds, getattr(bbg, 'pedidos', []), resumen, excel)
+    return Resultado(pos, cand, todas, tds, getattr(bbg, 'pedidos', []), resumen, excel, agg, alertas_resumen, hojas)
