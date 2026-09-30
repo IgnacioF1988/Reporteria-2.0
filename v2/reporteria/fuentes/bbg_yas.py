@@ -12,6 +12,14 @@ CAMPO_DUR = "YAS_MOD_DUR"
 CAMPO_XCCY = "YAS_XCCY_FIXED_COUPON_EQUIVALENT"
 
 
+def _valor(v):
+    """Campos numéricos → float; de texto (CPN_TYP, RESET_IDX, INFLATION_LINKED_INDICATOR) → str."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return str(v).strip()
+
+
 def _cascada(bbg: Bloomberg, isins: list[str], hermanos: dict[str, list[str]], campo: str, **ov) -> tuple[dict, dict]:
     """{isin: valor}, {isin: origen} probando '{ISIN} Corp' → '{ISIN}@BGN Corp' → hermanos."""
     val, org = {}, {}
@@ -20,13 +28,13 @@ def _cascada(bbg: Bloomberg, isins: list[str], hermanos: dict[str, list[str]], c
     res = bbg.bdp([f"{i} Corp" for i in isins], campo, **ov)
     for i in isins:
         if f"{i} Corp" in res.index and pd.notna(res[f"{i} Corp"]):
-            val[i], org[i] = float(res[f"{i} Corp"]), "DIRECTO"
+            val[i], org[i] = _valor(res[f"{i} Corp"]), "DIRECTO"
     pend = [i for i in isins if i not in val]
     if pend:
         res = bbg.bdp([f"{i}@BGN Corp" for i in pend], campo, **ov)
         for i in pend:
             if f"{i}@BGN Corp" in res.index and pd.notna(res[f"{i}@BGN Corp"]):
-                val[i], org[i] = float(res[f"{i}@BGN Corp"]), "BGN"
+                val[i], org[i] = _valor(res[f"{i}@BGN Corp"]), "BGN"
     pend = [i for i in pend if i not in val and hermanos.get(i)]
     if pend:
         tick = sorted({f"{h} Corp" for i in pend for h in hermanos[i]})
@@ -34,7 +42,7 @@ def _cascada(bbg: Bloomberg, isins: list[str], hermanos: dict[str, list[str]], c
         for i in pend:
             for h in hermanos[i]:
                 if f"{h} Corp" in res.index and pd.notna(res[f"{h} Corp"]):
-                    val[i], org[i] = float(res[f"{h} Corp"]), f"HERMANO:{h}"
+                    val[i], org[i] = _valor(res[f"{h} Corp"]), f"HERMANO:{h}"
                     break
     return val, org
 

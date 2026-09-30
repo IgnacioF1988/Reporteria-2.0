@@ -35,7 +35,9 @@ class FixtureBloomberg:
         if not p.exists():
             return pd.Series(dtype=float)
         d = pd.read_csv(p)
-        return pd.Series(pd.to_numeric(d["valor"], errors="coerce").values, index=d["ticker"].astype(str))
+        num = pd.to_numeric(d["valor"], errors="coerce")
+        vals = num.values if num.notna().all() else num.where(num.notna(), d["valor"]).values     # texto (RESET_IDX, CPN_TYP)
+        return pd.Series(vals, index=d["ticker"].astype(str))
 
     def bdp(self, tickers, campo, **overrides):
         self.pedidos.append((campo, tuple(tickers)))
@@ -106,9 +108,9 @@ class XbbgBloomberg:
             res.columns = [str(c).strip().upper() for c in res.columns]
             if campo.upper() in res.columns:
                 for t, v in res[campo.upper()].items():
-                    if pd.notna(v):
-                        out[str(t).strip()] = float(v)
-        return pd.Series(out, dtype=float)
+                    if pd.notna(v) and str(v).strip() != "":
+                        out[str(t).strip()] = float(v) if isinstance(v, (int, float)) else str(v).strip()
+        return pd.Series(out, dtype=float if all(isinstance(v, float) for v in out.values()) else object)
 
     def bds(self, ticker, campo, **overrides):
         try:

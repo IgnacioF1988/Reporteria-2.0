@@ -36,6 +36,21 @@ Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input oblig
 | `FACTURA` | EXCEPCIONES → RPT de facturas | nada |
 | `CERO` / `EXCLUIR` | yield 0 / fuera de métricas | nada |
 
+### Conversión a la moneda del fondo (H4)
+| Caso | Qué se hace | Columnas |
+|---|---|---|
+| Papel indexado (UF, UDI, UVR, IPCA, UI, BONCER, VAC) | breakeven al plazo de la duration: `ajuste = (1+r_nom)/(1+r_real) − 1`, `Yield = (1+y_real)(1+ajuste) − 1`; la Modified se reexpresa `Mac/(1+y_local)` (el legacy la dejaba igual) | `Conversion=BREAKEVEN`, `Yield_Papel`, `Duration_Papel` |
+| Flotante con TD propia (CDI, TIIE desde EXCEPCIONES/CSHF/JSONL) | se compone el spread con el nivel spot del índice (aprox.; ver FUTURO) | `Conversion=SUMA_INDICE` |
+| Flotante de proveedor | no se toca; se asume nominal local (alerta INFO `FLOTANTE_PROVEEDOR`) | `PROVEEDOR_NOMINAL` |
+| Papel USD hedgeado (`Hedge_Currency`) | `politica_hedge`: `XCCY_SI_EXISTE` usa el swap de mercado (`Yield_XCCY`) y si no el drop propio (`Yield_Drop = y_usd + local + basis − usd` con curvas `CURVE_TENOR_RATES`); `DROP_SIEMPRE` usa el drop. Siempre se calculan ambos y `Dif_XCCY_Drop_bps` alerta sobre `xccy_drop_max_bps` | `Conversion=XCCY/DROP`, `Yield_Drop`, `Dif_XCCY_Drop_bps` |
+| Override de valor (`REGLAS/overrides_valor`) | pisa todo al final, con vigencia; `Fuente=OVERRIDE` | `Conversion=OVERRIDE` |
+
+El índice de cada papel (`Indice`, `Indice_Origen`) sale de: override del operador → moneda que lo declara (CLF, UDI, UVR COSTER,
+UI CURNCY) → Bloomberg (`INFLATION_LINKED_INDICATOR`, `CPN_TYP`+`RESET_IDX`) para papeles con ISIN en moneda local ambigua →
+NOMINAL. Curvas reales y nominales: `Carga_Indexes_{FECHA}*.csv` y `Carga_CurvasSoberanas_{FECHA}*.csv` (MERCADO, sep `|`).
+Lo que no se puede convertir queda con la yield del papel y alerta ALTA (`SIN_BREAKEVEN`, `SIN_CONVERSION_HEDGE`); el detalle
+numérico de cada conversión va a la hoja `conversiones` y las curvas usadas a `curvas_drop`.
+
 Toda métrica de proveedor pasa por sanidad (`yield_min/max_proveedor`, duration > 0) antes de elegirse; lo descartado queda
 en `candidatos` con su motivo. Las posiciones hedgeadas (`Hedge_Currency` por fondo) reciben además `Yield_XCCY`
 (`YAS_XCCY_FIXED_COUPON_EQUIVALENT`), que en H4 se compara con el drop. Cada consulta a Bloomberg queda en

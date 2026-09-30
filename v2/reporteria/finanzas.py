@@ -35,3 +35,28 @@ def duracion(flujos_fut: list[float], fechas_fut: list, settle, y_ef: float) -> 
         return float("nan"), float("nan")
     mac = sum(ti * p for ti, p in zip(t, pv)) / tot
     return mac, mac / (1 + y_ef)
+
+
+# ── Conversión de yields (todo en decimal) ───────────────────────────────────────────────────────────────────────
+def reexpresar_duracion(dur_mod: float, y_origen: float, y_destino: float) -> float:
+    """La Macaulay no cambia al cambiar la moneda de la yield (mismos flujos); la Modified sí: Mac/(1+y)."""
+    return dur_mod * (1 + y_origen) / (1 + y_destino)
+
+
+def breakeven(y_real: float, dur_mod: float, r_real: float, r_nom: float) -> tuple[float, float, float]:
+    """(yield_local, duration_local, ajuste). ajuste = (1+r_nom)/(1+r_real) − 1 al plazo de la duration."""
+    ajuste = (1 + r_nom) / (1 + r_real) - 1
+    y_local = (1 + y_real) * (1 + ajuste) - 1
+    return y_local, reexpresar_duracion(dur_mod, y_real, y_local), ajuste
+
+
+def sumar_indice(spread: float, dur_mod: float, nivel: float) -> tuple[float, float]:
+    """Flotante con TD propia (solo spread): se compone con el nivel spot del índice. Aproximación: no proyecta la forward."""
+    y = (1 + spread) * (1 + nivel) - 1
+    return y, reexpresar_duracion(dur_mod, spread, y)
+
+
+def drop(y_usd: float, r_local: float, r_usd: float, r_basis: float = 0.0) -> tuple[float, float]:
+    """(yield_drop, drop): drop = (local + basis) − usd; la yield se traslada aditivamente y la duration no cambia."""
+    d = r_local + r_basis - r_usd
+    return y_usd + d, d

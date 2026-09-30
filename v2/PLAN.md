@@ -126,7 +126,7 @@ RECARR primer cupón completo (ancla último cupón pagado, 182 días) · CASH U
 
 ## 5b. Estado y diseño detallado de H3 (Bloomberg, CSHF, JSONL) — a implementar
 
-**Hecho:** H0, H1, H2 y H3 en `v2/` (63 tests). La muestra real (1.000 posiciones, 14 fondos) resuelve 844; faltan 155 de renta fija que dependen de Bloomberg o de TD propias.
+**Hecho:** H0–H4 en `v2/` (84 tests). H4: `indices.py`, `curvas.py`, `conversion.py`, `overrides.aplicar_valores`; goldens 243 breakeven y 106 drops ±1 bp; la duration del breakeven se reexpresa (BAARA-B 4.305 → 4.171); `Dif_XCCY_Drop_bps = XCCY − drop`; caché sembrada con CURVAS_DROPS y ATRIBUTOS del legacy. La muestra real (1.000 posiciones, 14 fondos) resuelve 844; faltan 155 de renta fija que dependen de Bloomberg o de TD propias.
 
 **Insumos ya copiados a `v2/tests/fixtures/corporativo/`:** `LEGACY_METRICAS_20260731.xlsx` (BBG_Yield/BBG_Duration/BBG_XCCY_Yield por PK2 con `Origen_BBG_*` DIRECTO/BGN/HERMANO y `Hedge_Currency`), `LEGACY_CSHF_20260731.xlsx` (`resueltos` + `td_detalle` con `Flujo_baseFACE`, `face_bbg` por ISIN), `LEGACY_PROP_JSONL_20260731.xlsx`, `bond_schedule.jsonl` (270 records). Solapamiento con la muestra: 208 tuplas BBG (62 XCCY), 9 CSHF (6 con escala OK), 45 códigos GENEVA en el jsonl.
 

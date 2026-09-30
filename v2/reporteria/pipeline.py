@@ -12,8 +12,11 @@ from . import alertas, cascada, clasificacion, overrides, salida, universo
 from .config import MAX_DIAS_ATRAS_PARIDADES, RISK_COUNTRY_TO_LOCAL_CCY, STRONG_CCY, SUFIJOS_SERIE
 from .adaptadores.bbg import Bloomberg, CacheBloomberg, FixtureBloomberg
 from .adaptadores.fx_sql import CacheFx, FixtureFx, FuenteFx
+from .conversion import convertir
+from .curvas import curvas_drops, leer_curvas_csv
 from .escala import EscalaCfg
 from .fx import armar_fx
+from .indices import asignar_indice
 from .config import Rutas
 from .fuentes.bbg_yas import candidatos_bbg
 from .fuentes.cajas import candidatos_cajas
@@ -30,6 +33,7 @@ from .lectura.manuales import leer_excepciones, leer_facturas
 from .lectura.mercado import hoja_ra, leer_jpm, leer_paridades, leer_ra
 from .lectura.reglas import leer_reglas
 from .log import configurar_log
+from .modelo import limpiar_txt
 from .salida import COLS_CARTERA
 
 
@@ -202,6 +206,18 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
 
     pos, cand, a = cascada.elegir(pos, cand, defaulted, reglas.defaulteados, rutas.settle, yt_default)
     al.append(a)
+
+    # ── H4: índice, conversión a moneda del fondo (breakeven / XCCY / drop) y overrides de valor ──
+    pos, a = asignar_indice(pos, bbg, rutas.fecha); al.append(a)
+    curvas_real = _opcional("Carga_Indexes", rutas.indexes, lambda p: leer_curvas_csv(p, rutas.settle), log, al) or {}
+    curvas_nom = _opcional("CurvasSoberanas", rutas.curvas_sob, lambda p: leer_curvas_csv(p, rutas.settle), log, al) or {}
+    hedged = pos[limpiar_txt(pos["Hedge_Currency"]).ne("") & pos["Estado"].eq("RESUELTO") & pos["Risk_Currency"].eq("USD")]
+    monedas_drop = set(limpiar_txt(hedged["Hedge_Currency"]).str.upper())
+    cdrop, tabla_curvas, a = curvas_drops(bbg, monedas_drop, rutas.fecha); al.append(a)
+    pos, conversiones, a = convertir(pos, curvas_real, curvas_nom, cdrop, reglas.parametros); al.append(a)
+    log.info("conversiones: %s", conversiones["Resultado"].value_counts().to_dict() if len(conversiones) else {})
+    pos, c, a = overrides.aplicar_valores(pos, reglas.overrides_valor, rutas.settle); al.append(a)
+    cand = pd.concat([cand, c], ignore_index=True) if len(c) else cand
     yld_flag = M.leer_yld_flag(rutas.bd_yld_flag) if Path(rutas.bd_yld_flag).exists() else {}
     pos["CalcType_exportable"] = pos["CalcType"].map(yld_flag).fillna(pos["CalcType"])
 
@@ -219,6 +235,8 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         "cartera_final": pos[[c for c in COLS_CARTERA if c in pos.columns]],
         "candidatos": cand,
         "alertas": todas.sort_values(["Severidad", "Nombre"]) if len(todas) else todas,
+        "conversiones": conversiones,
+        "curvas_drop": tabla_curvas,
         "td_detalle": tds,
     }
     excel = salida.escribir_excel(hojas, rutas.excel_final)

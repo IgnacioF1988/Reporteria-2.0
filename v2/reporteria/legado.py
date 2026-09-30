@@ -10,14 +10,16 @@ from pathlib import Path
 import pandas as pd
 
 from .adaptadores.bbg import _archivo, _ruta_bds
+from .config import CURVAS_DROPS, INDICES
+from .curvas import CAMPO_CURVA
 from .modelo import limpiar_txt
 
 CAMPO_XCCY = "YAS_XCCY_FIXED_COUPON_EQUIVALENT"
 
 
-def _buscar(legacy: Path, nombre: str, fecha: str) -> Path | None:
-    for cand in (legacy / f"{nombre}_{fecha}.xlsx", legacy / f"LEGACY_{nombre}_{fecha}.xlsx",
-                 legacy / "02_OUTPUTS" / fecha / f"{nombre}_{fecha}.xlsx"):
+def _buscar(legacy: Path, nombre: str, fecha: str, ext: str = "xlsx") -> Path | None:
+    for cand in (legacy / f"{nombre}_{fecha}.{ext}", legacy / f"LEGACY_{nombre}_{fecha}.{ext}",
+                 legacy / "02_OUTPUTS" / fecha / f"{nombre}_{fecha}.{ext}", legacy / "01_INPUTS" / "MERCADO" / f"{nombre}_{fecha}.{ext}"):
         if cand.exists():
             return cand
     return None
@@ -77,4 +79,34 @@ def importar_cache_legacy(legacy: Path, cache: Path, fecha: str) -> dict[str, in
                           "Face": g["face_bbg"].astype(float)}).to_csv(p, index=False)
             n += 1
         out["DES_CASH_FLOW"] = n
+    curvas = _buscar(legacy, "CURVAS_DROPS", fecha, "csv")
+    if curvas:      # respaldo del legacy: Curva = "{CCY}_{local|basis|usd}" → ticker de config.CURVAS_DROPS
+        cv = pd.read_csv(curvas)
+        n = 0
+        for nombre, g in cv.groupby("Curva"):
+            ccy, _, pieza = str(nombre).partition("_")
+            tick = CURVAS_DROPS.get(ccy, {}).get(pieza)
+            if not tick:
+                continue
+            p = _ruta_bds(cache, CAMPO_CURVA, f"{tick} Index")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame({"Tenor": g["tenor"].astype(str), "Tenor Ticker": g["ticker"].astype(str), "Mid Yield": g["mid"].astype(float)}).to_csv(p, index=False)
+            n += 1
+        out[CAMPO_CURVA] = n
+    atr = _buscar(legacy, "ATRIBUTOS", fecha)
+    if atr:         # Index_Type derivado de BBG → INFLATION_LINKED_INDICATOR / CPN_TYP / RESET_IDX por ISIN
+        a = pd.read_excel(atr, sheet_name="atributos")
+        a["ISIN"] = limpiar_txt(a["ISIN"])
+        a = a[a["ISIN"].ne("") & limpiar_txt(a["Origen_Index_Type"]).str.startswith("BBG")].drop_duplicates("ISIN")
+        infl, cpn, reset = {}, {}, {}
+        for _, r in a.iterrows():
+            t, it = f"{r['ISIN']} Corp", str(r["Index_Type"]).strip().upper()
+            infl[t] = "Y" if it in INDICES and INDICES[it]["cat"] == "REAL" else "N"
+            if pd.notna(r.get("CPN_TYP")):
+                cpn[t] = str(r["CPN_TYP"]).strip().upper()
+            if it.startswith("NUEVO:"):
+                reset[t], cpn[t] = it.split(":", 1)[1], "FLOATING"
+        out["INFLATION_LINKED_INDICATOR"] = len(infl); _guardar_bdp(cache, "INFLATION_LINKED_INDICATOR", fecha, {}, infl)
+        out["CPN_TYP"] = len(cpn); _guardar_bdp(cache, "CPN_TYP", fecha, {}, cpn)
+        out["RESET_IDX"] = len(reset); _guardar_bdp(cache, "RESET_IDX", fecha, {}, reset)
     return out

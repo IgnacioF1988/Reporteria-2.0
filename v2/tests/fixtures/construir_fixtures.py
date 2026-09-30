@@ -105,8 +105,13 @@ def main():
     params = pd.DataFrame([("yield_max_proveedor", 1.0, "Yield máxima aceptada de un proveedor (decimal)"),
                            ("yield_min_proveedor", -0.5, "Yield mínima aceptada"),
                            ("factura_tolerancia_monto", 0.01, "Diferencia relativa monto_compra vs TotalMVal que alerta"),
-                           ("yield_type_default", 15, "Yield_Type cuando el maestro trae 0 o vacío (15 = YTW)")],
+                           ("yield_type_default", 15, "Yield_Type cuando el maestro trae 0 o vacío (15 = YTW)"),
+                           ("politica_hedge", "XCCY_SI_EXISTE", "Hedgeados: XCCY_SI_EXISTE (swap de mercado, si no drop propio) o DROP_SIEMPRE"),
+                           ("xccy_drop_max_bps", 50, "Alerta XCCY_VS_DROP cuando |XCCY − drop propio| supera estos bps")],
                           columns=["Clave", "Valor", "Descripcion"])
+    # override de valor de ejemplo: DOCUFO (defaulteado de facto, BBG devuelve duration 0) en el fondo 16 → yield 12 %, duration 1
+    ov_val = pd.DataFrame([(16, 168617, 1, 0.12, 1.0, None, None, "OPERADOR", "DOCUFO 10.25 07/24/2024 144A: reestructuración, valor acordado con PM")],
+                          columns=ov_val.columns)
     with pd.ExcelWriter(MINI / "REGLAS.xlsx") as w:
         for nombre, df in [("fondos", fondos), ("buckets", buckets), ("clasificacion", clas), ("cajas", cajas),
                            ("defaulteados", defs), ("overrides_valor", ov_val), ("overrides_atributo", ov_att),
@@ -169,7 +174,22 @@ def main():
     bbg = MINI / "bbg_cache"; bbg.mkdir(exist_ok=True)
     for old in bbg.glob("bdp_*.csv"):
         old.unlink()
+    for old in bbg.glob("bds_CURVE_TENOR_RATES/*.csv"):
+        old.unlink()
     print("caché legacy:", importar_cache_legacy(CORP, bbg, FECHA))
+    # curvas corporativas del cierre (reales por índice y soberanas nominales) y goldens de conversión del legacy
+    for f in CORP.glob(f"Carga_Indexes_{FECHA}*.csv"):
+        (MINI / f.name).write_bytes(f.read_bytes())
+    for f in CORP.glob(f"Carga_CurvasSoberanas_{FECHA}*.csv"):
+        (MINI / f.name).write_bytes(f.read_bytes())
+    be = pd.read_excel(CORP / "LEGACY_BREAKEVEN_20260731.xlsx", sheet_name="convertidos")
+    be["ID_Fund"] = be["Fondo"].map(nombre2id).astype(int)
+    be[["ID_Fund", "PK2", "Index_Type", "Fuente", "Yield_original", "Duration_original", "plazo_dias", "r_real_%", "r_nom_%", "ajuste",
+        "Yield_local", "Extrapolado"]].to_csv(MINI / "golden_breakeven_20260731.csv", index=False)
+    dr = pd.read_excel(CORP / "LEGACY_DROPS_20260731.xlsx", sheet_name="convertidos")
+    dr["ID_Fund"] = dr["Fondo"].map(nombre2id).astype(int)
+    dr[["ID_Fund", "PK2", "Hedge_Currency", "Yield_USD", "Duration_original", "BBG_XCCY_Yield", "plazo_dias", "r_local_%", "r_basis_bps",
+        "r_usd_%", "drop", "Yield_Drop", "Dif_vs_XCCY_bps", "Metodo"]].to_csv(MINI / "golden_drops_20260731.csv", index=False)
     pd.DataFrame([("OBFR01 Index", 4.33), ("FEDL01 Index", 4.33), ("ESTRON Index", 1.92), ("SONIO/N Index", 4.00),
                   ("MXIBTIIE Index", 7.75), ("CABROVER Index", 2.75), ("NIBOR1W Index", 4.30)],
                  columns=["ticker", "valor"]).to_csv(bbg / f"bdh_PX_LAST_{FECHA}.csv", index=False)

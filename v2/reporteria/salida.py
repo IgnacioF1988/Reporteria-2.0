@@ -12,7 +12,8 @@ COLS_CARTERA = ["Pos_ID", "ID_Fund", "Fondo", "PK2", "BalanceSheet", "Name_Instr
                 "Risk_Currency", "Moneda_PK2", "Investment_Type_Code", "Issue_Type_Code", "Coupon_Type_Code",
                 "Base_Name", "Familia", "ISIN_Hermanos", "Hedge_Currency", "Hedge_Origen", "Indice", "Overrides",
                 "BalSheetKey", "Bucket", "Bucket_Origen", "Bucket_Orden", "Ficha_FI", "FX_Exposure", "Tratamiento",
-                "Yield", "Duration", "Yield_Moneda", "Yield_XCCY", "Fuente", "Origen", "Etapa", "Estado", "Estado_DEF", "CalcType",
+                "Yield", "Duration", "Yield_Moneda", "Conversion", "Yield_Papel", "Duration_Papel", "Yield_XCCY", "Yield_Drop",
+                "Dif_XCCY_Drop_bps", "Indice_Origen", "Extrapolado", "Fuente", "Origen", "Etapa", "Estado", "Estado_DEF", "CalcType",
                 "CalcType_exportable", "Motivo", "TotalMVal", "MVBook", "AI", "LocalPrice", "Qty", "Factor"]
 
 
@@ -34,5 +35,5 @@ def escribir_excel(hojas: dict[str, pd.DataFrame], path: Path) -> Path:
     with pd.ExcelWriter(path, engine="openpyxl") as w:
         for nombre, df in hojas.items():
             (df if len(df) else pd.DataFrame({"info": ["sin filas"]})).to_excel(w, sheet_name=nombre[:31], index=False)
-            _formatear(w.sheets[nombre[:31]], {"Yield", "Yield_Local", "Yield_Drop", "AW", "DW"})
+            _formatear(w.sheets[nombre[:31]], {"Yield", "Yield_Local", "Yield_Drop", "Yield_Papel", "Yield_XCCY", "AW", "DW"})
     return path

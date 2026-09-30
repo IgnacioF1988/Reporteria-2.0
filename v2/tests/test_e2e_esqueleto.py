@@ -81,7 +81,8 @@ def test_corrida_muestra(rutas, bbg, fx):
     assert (pos["Fuente"] == "JPM").sum() >= 100 and (pos["Fuente"] == "RA").sum() >= 4
     ltmci = _fila(pos, "176139-1", 20)
     assert ltmci["Estado"] == "RESUELTO" and ltmci["Fuente"] == "JPM" and ltmci["CalcType_exportable"] == "YTW"
-    assert 0.05 < ltmci["Yield"] < 0.08 and ltmci["Yield_Moneda"] == "USD"
+    assert 0.05 < ltmci["Yield_Papel"] < 0.08 and ltmci["Yield_Moneda"] == "CLP"          # H4: fondo 20 hedgea a CLP
+    assert ltmci["Conversion"] in ("XCCY", "DROP") and ltmci["Yield"] != ltmci["Yield_Papel"]
     exc = pos[pos["Fuente"] == "EXCEPCIONES"]
     assert len(exc) >= 30 and (exc["CalcType"] == "PROP").all()
     assert _fila(pos, "527-1", 20)["Fuente"] == "EXCEPCIONES"                             # BAUZA LOAN, flujos del PM

@@ -12,3 +12,6 @@
 10. Tratamiento fino de pasivos (bank debt con tasa real, derivados por pata).
 11. Exportación a base corporativa (hoy Excel + JSON).
 12. Alerta de cupón negativo en TDs propias (F4 del legacy, nunca implementada).
+13. Índice desde `Atributos_{FONDO}.xlsx` del operador (columna `Index Name`): hoy el override por fondo va en REGLAS/overrides_atributo (`Field=Indice`).
+14. Curvas de drops para ARS/UYU y basis para PEN/BRL (hoy DIRECT con una sola curva, como el legacy).
+15. XCCY para papeles hedgeados que no están en USD (EUR/GBP → moneda local): hoy solo se usa el XCCY de BBG si existe.

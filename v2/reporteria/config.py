@@ -18,6 +18,42 @@ RISK_COUNTRY_TO_LOCAL_CCY = {"AR": "ARS", "BR": "BRL", "CL": "CLP", "PE": "PEN",
 # Yield_Type del maestro → campo YAS de Bloomberg (BD_YIELD: 1 YTM, 2 YTC, 15 YTW, 28 YTA)
 YIELD_TYPE_BBG = {1: "YAS_YLD_MATURITY", 2: "YAS_YLD_CALL", 15: "YAS_BOND_YLD", 28: "YAS_YLD_AVG_LIFE"}
 
+# ── Índices (conversión de yields) ───────────────────────────────────────────────────────────────────────────────
+# REAL: la yield del papel es real → breakeven con la curva nominal local (Carga_CurvasSoberanas) y la real (Carga_Indexes).
+# RATE: flotante; si la TD es propia (solo spread) se le suma el nivel del índice; si viene de proveedor se asume nominal local.
+INDICES = {
+    "UF":     dict(cat="REAL", real="BTUCHILE",    nom="LCCHILE",     ccy="CLP"),
+    "UDI":    dict(cat="REAL", real="UDIMEXICO",   nom="LCMEXICO",    ccy="MXN"),
+    "UVR":    dict(cat="REAL", real="UVRCOLOMBIA", nom="LCCOLOMBIA",  ccy="COP"),
+    "IPCA":   dict(cat="REAL", real="IPCABRAZIL",  nom="LCBRAZIL",    ccy="BRL"),
+    "UI":     dict(cat="REAL", real="UIURUGUAY",   nom="LCURUGUAY",   ccy="UYU"),
+    "BONCER": dict(cat="REAL", real="BONCERARG",   nom="LCARGENTINA", ccy="ARS"),
+    "VAC":    dict(cat="REAL", real="VACPERU",     nom="LCPERU",      ccy="PEN"),
+    "CDI":    dict(cat="RATE", real="CDIBRAZIL",   nom=None,          ccy="BRL"),
+    "TIIE":   dict(cat="RATE", real="MXNTIIEMXN",  nom=None,          ccy="MXN"),
+}
+INDICES_SIN_CONVERSION = {"", "NOMINAL", "SOFR", "UST1Y", "UST5Y", "UST10Y"}
+# Monedas que declaran el índice por sí mismas (BD_Monedas: supramoneda ≠ código)
+CCY_A_INDICE = {"CLF": "UF", "UDI": "UDI", "UVR COSTER": "UVR", "UI CURNCY": "UI"}
+# Monedas locales donde un papel puede ser nominal o indexado: lo decide Bloomberg (INFLATION_LINKED_INDICATOR / RESET_IDX)
+CCY_AMBIGUA = {"ARS", "BRL", "COP", "MXN", "PEN", "UYU", "CLP", "MXV"}
+INFLACION_PAIS = {"CL": "UF", "CH": "UF", "MX": "UDI", "CO": "UVR", "BR": "IPCA", "UY": "UI", "AR": "BONCER", "PE": "VAC"}
+RESET_IDX_A_INDICE = {"BZDIOVRA": "CDI", "MXIBTIEF": "TIIE", "MXIBTIIE": "TIIE", "SOFRRATE": "SOFR",
+                      "H15T1Y": "UST1Y", "H15T5Y": "UST5Y", "H15T10Y": "UST10Y"}
+ALIAS_INDICE = {"CLCPI": "UF", "CLF": "UF", "CER": "BONCER", "MXCPI": "UDI", "UVR COSTER": "UVR", "BRCPI": "IPCA", "UYCPI": "UI"}
+FUENTES_TD_PROPIA = {"EXCEPCIONES", "CSHF", "JSONL"}
+# ── Drops: papel USD swapeado a moneda local nominal ─────────────────────────────────────────────────────────────
+# drop = local_all_in − pata_usd al plazo de la duration. ADD: local + basis (bps); DIRECT: una curva ya combinada.
+CURVAS_DROPS = {
+    "CLP": dict(metodo="ADD", local="YCSW0193", local_prefix="CHSWNI", basis="YCSW0194", basis_prefix="CPXOSS", usd="YCSW0490", usd_prefix="USOSFR"),
+    "COP": dict(metodo="ADD", local="YCSW0329", local_prefix="CLSWIB", basis="YCSW0192", basis_prefix="CLXOQQ", usd="YCSW0490", usd_prefix="USOSFR"),
+    "MXN": dict(metodo="ADD", local="YCSW0083", local_prefix="MPSW", basis="YCSW0151", basis_prefix="MPBSF", usd="YCSW0490", usd_prefix="USOSFR"),
+    "PEN": dict(metodo="DIRECT", local="YCSW0374", local_prefix="PENSSS", usd="YCSW0490", usd_prefix="USOSFR"),
+    "BRL": dict(metodo="DIRECT", local="YCSW0089", local_prefix=None, usd="YCSW0304", usd_prefix=None),
+}
+CURVAS_SIN_FALLBACK_AUTO = {"MPSW", "MPBSF"}       # tickers no numéricos: si falta 1Y/30Y se extrapola plano
+POLITICAS_XCCY = ("XCCY_SI_EXISTE", "DROP_SIEMPRE")
+
 
 def _uno(patron: str) -> Path | None:
     hits = sorted(p for p in glob.glob(patron) if not os.path.basename(p).startswith("~$"))
