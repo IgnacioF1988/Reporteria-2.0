@@ -25,7 +25,7 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
 8. Cerrar: el reporte final es el último `REPORTE_F.xlsx`. El cierre siguiente lo usa como cierre anterior (hedge heredado y alertas temporales A05–A07).
 
 ## Versiones
-- `xbbg` 0.7 y ≥ 1.0 funcionan (el adaptador detecta la versión). Si pandas avisa `Backend 'pyarrow' requires pyarrow >= 22`, es solo un aviso; se quita con `pip install --upgrade pyarrow`.
+- `xbbg` 0.7 y ≥ 1.0 funcionan (el adaptador detecta la versión). La 1.x necesita `pyarrow>=22` (viene en el extra `bbg`); si aparece `Backend 'pyarrow' requires pyarrow >= 22`, correr `py -3.12 -m pip install --user --upgrade "pyarrow>=22"`.
 - Si `python` abre la Microsoft Store, usar `py -3.12 -m reporteria.cli ...` (o la versión 3.11+ instalada: `py -0` las lista).
 
 ## Códigos de salida

@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = ["pandas>=2.2", "numpy", "scipy", "openpyxl", "python-dotenv", "typer"]
 
 [project.optional-dependencies]
-bbg = ["xbbg"]
+bbg = ["xbbg", "pyarrow>=22"]
 sql = ["pyodbc"]
 dev = ["pytest"]
 
