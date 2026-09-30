@@ -94,6 +94,8 @@ class CacheBloomberg(FixtureBloomberg):
 
 def _es_fallo_de_sesion(msg: str) -> bool:
     m = msg.lower()
+    if "securities failed" in m or "bad_sec" in m or "invalid security" in m:
+        return False
     return any(k in m for k in ("session start", "failed to spawn worker", "connect", "connection", "no running event loop",
                                 "session", "io_error", "not logged", "8194"))
 
@@ -114,6 +116,7 @@ class XbbgBloomberg:
         self.blp, self.lote = blp, lote
         self.nueva_api = int(str(version or "0").split(".")[0].split("+")[0] or 0) >= 1
         self.errores: list[str] = []          # fallos de sesión/conexión: tras el primero no se vuelve a intentar
+        self.avisos: list[str] = []           # pedidos rechazados (p. ej. todos los tickers inválidos): se sigue sin dato
 
     @staticmethod
     def _ov(overrides: dict) -> dict:
@@ -138,12 +141,13 @@ class XbbgBloomberg:
                 kw = {"backend": "pandas", **kw}
                 return self._a_pandas(fn(*args, overrides=ov, **kw) if ov else fn(*args, **kw))
             return fn(*args, **ov, **kw)
-        except Exception as e:                   # noqa: BLE001 — cualquier fallo de la terminal deja la corrida sin BBG
+        except Exception as e:                   # noqa: BLE001 — la terminal nunca tumba la corrida
             msg = f"{type(e).__name__}: {str(e)[:200]}"
             if _es_fallo_de_sesion(msg):
-                self.errores.append(msg)
-                return None
-            raise
+                self.errores.append(msg)          # sin sesión: no se vuelve a intentar
+            else:
+                self.avisos.append(msg)           # pedido rechazado (tickers inválidos, campo desconocido…): sin dato
+            return None
 
     @staticmethod
     def _a_pandas(res):

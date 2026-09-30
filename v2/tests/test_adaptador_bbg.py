@@ -127,3 +127,21 @@ def test_terminal_caida_no_reintenta_y_deja_rastro():
     assert x.bdp(["A Corp"], "YAS_BOND_YLD", settle_dt="20260731").empty and x.caida
     assert x.bds("A Corp", "DES_CASH_FLOW").empty and x.historico(["X Index"], "PX_LAST", "20260731").empty
     assert blp.intentos == 1 and "session start failed" in x.errores[0]
+
+
+class BlpRechaza:
+    def bdp(self, tickers, flds, overrides=None, backend=None, **kw):
+        if all(t.endswith("@BGN Corp") for t in tickers):
+            raise RuntimeError("Request failed on //blp/refdata::ReferenceDataRequest - All securities failed: X@BGN Corp")
+        return pd.DataFrame([(t, flds, "5.0") for t in tickers if t == "A Corp"], columns=["ticker", "field", "value"])
+
+    bds = bdh = bdp
+
+
+def test_pedido_rechazado_no_es_caida_y_la_cascada_sigue():
+    from reporteria.adaptadores.bbg import XbbgBloomberg
+    from reporteria.fuentes.bbg_yas import _cascada
+    x = XbbgBloomberg(blp=BlpRechaza(), version="1.4.12")
+    val, org = _cascada(x, ["A", "X"], {"X": ["H"]}, "YAS_BOND_YLD", settle_dt="20260731")
+    assert val == {"A": 5.0} and org == {"A": "DIRECTO"} and not x.caida and len(x.avisos) == 1
+    assert "All securities failed" in x.avisos[0]

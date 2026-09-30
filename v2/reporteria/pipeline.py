@@ -248,6 +248,10 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     # ── H5: alertas por reglas, agregados y salida completa ──
     pos = alertas.unir_anterior(pos, ant)
     al_reglas, res_reglas = alertas.evaluar(pos, reglas.alertas, reglas.parametros, ant is not None)
+    avisos_bbg = getattr(getattr(bbg, "inner", bbg), "avisos", [])
+    if avisos_bbg:
+        log.warning("Bloomberg rechazó %d pedidos (tickers inválidos u overrides no aceptados); quedan sin dato", len(avisos_bbg))
+        al.append(alertas.emitir("BBG_PEDIDO_RECHAZADO", "INFO", detalle=f"{len(avisos_bbg)} pedidos; primero: {avisos_bbg[0]}", ambito="CORRIDA"))
     if getattr(getattr(bbg, "inner", bbg), "caida", False):
         errores = getattr(bbg, "inner", bbg).errores
         log.error("Bloomberg no respondió (%s): lo pendiente de BBG/CSHF queda FALTANTE y las curvas de drop vacías", errores[0])
