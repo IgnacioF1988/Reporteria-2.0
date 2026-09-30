@@ -248,6 +248,10 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     # ── H5: alertas por reglas, agregados y salida completa ──
     pos = alertas.unir_anterior(pos, ant)
     al_reglas, res_reglas = alertas.evaluar(pos, reglas.alertas, reglas.parametros, ant is not None)
+    if getattr(getattr(bbg, "inner", bbg), "caida", False):
+        errores = getattr(bbg, "inner", bbg).errores
+        log.error("Bloomberg no respondió (%s): lo pendiente de BBG/CSHF queda FALTANTE y las curvas de drop vacías", errores[0])
+        al.append(alertas.emitir("BBG_SIN_CONEXION", "CRITICA", detalle=f"terminal sin sesión/API en la estación: {errores[0]}", ambito="CORRIDA"))
     estructurales = alertas.ajustar_estructurales(alertas.juntar(*al), reglas.alertas)
     todas = alertas.juntar(estructurales, al_reglas)
     alertas_resumen = pd.concat([res_reglas, alertas.resumen_estructurales(estructurales, pos)], ignore_index=True)

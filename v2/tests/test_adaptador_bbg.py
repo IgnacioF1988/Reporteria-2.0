@@ -107,3 +107,23 @@ def test_xbbg_api_vieja_formato_ancho():
     assert x.bdp(["A Corp"], "YAS_BOND_YLD", settle_dt="20260731").to_dict() == {"A Corp": 5.25}
     assert list(x.bds("A Corp", "DES_CASH_FLOW").columns) == ["payment_date", "coupon_amount", "principal_amount"]
     assert x.historico(["OBFR01 Index"], "PX_LAST", "20260731").to_dict() == {"OBFR01 Index": 4.33}
+
+
+class BlpCaido:
+    def __init__(self):
+        self.intentos = 0
+
+    def bdp(self, *a, **k):
+        self.intentos += 1
+        raise RuntimeError("Internal error: failed to spawn worker 0: session start failed")
+
+    bds = bdh = bdp
+
+
+def test_terminal_caida_no_reintenta_y_deja_rastro():
+    from reporteria.adaptadores.bbg import XbbgBloomberg
+    blp = BlpCaido()
+    x = XbbgBloomberg(blp=blp, version="1.4.12")
+    assert x.bdp(["A Corp"], "YAS_BOND_YLD", settle_dt="20260731").empty and x.caida
+    assert x.bds("A Corp", "DES_CASH_FLOW").empty and x.historico(["X Index"], "PX_LAST", "20260731").empty
+    assert blp.intentos == 1 and "session start failed" in x.errores[0]

@@ -92,6 +92,12 @@ class CacheBloomberg(FixtureBloomberg):
         return d
 
 
+def _es_fallo_de_sesion(msg: str) -> bool:
+    m = msg.lower()
+    return any(k in m for k in ("session start", "failed to spawn worker", "connect", "connection", "no running event loop",
+                                "session", "io_error", "not logged", "8194"))
+
+
 class XbbgBloomberg:
     """Terminal real vía xbbg. Import diferido: solo existe en Windows con terminal.
 
@@ -107,6 +113,7 @@ class XbbgBloomberg:
             version = version or getattr(xbbg, "__version__", "0")
         self.blp, self.lote = blp, lote
         self.nueva_api = int(str(version or "0").split(".")[0].split("+")[0] or 0) >= 1
+        self.errores: list[str] = []          # fallos de sesión/conexión: tras el primero no se vuelve a intentar
 
     @staticmethod
     def _ov(overrides: dict) -> dict:
@@ -117,12 +124,26 @@ class XbbgBloomberg:
             out[str(k).strip().upper()] = v.strftime("%Y%m%d") if hasattr(v, "strftime") else str(v)
         return out
 
+    @property
+    def caida(self) -> bool:
+        return bool(self.errores)
+
     def _llamar(self, fn, *args, **kw):
+        """Llama a xbbg; si la terminal no responde (sesión/conexión) registra el error y devuelve None sin reintentar."""
+        if self.caida:
+            return None
         ov = self._ov(kw.pop("overrides", {}) or {})
-        if self.nueva_api:                       # ≥1.0: pandas explícito (el backend por defecto puede ser narwhals/arrow)
-            kw = {"backend": "pandas", **kw}
-            return self._a_pandas(fn(*args, overrides=ov, **kw) if ov else fn(*args, **kw))
-        return fn(*args, **ov, **kw)
+        try:
+            if self.nueva_api:                   # ≥1.0: pandas explícito (el backend por defecto puede ser narwhals/arrow)
+                kw = {"backend": "pandas", **kw}
+                return self._a_pandas(fn(*args, overrides=ov, **kw) if ov else fn(*args, **kw))
+            return fn(*args, **ov, **kw)
+        except Exception as e:                   # noqa: BLE001 — cualquier fallo de la terminal deja la corrida sin BBG
+            msg = f"{type(e).__name__}: {str(e)[:200]}"
+            if _es_fallo_de_sesion(msg):
+                self.errores.append(msg)
+                return None
+            raise
 
     @staticmethod
     def _a_pandas(res):
@@ -190,7 +211,7 @@ class XbbgBloomberg:
     def bds(self, ticker, campo, **overrides):
         try:
             d = self._llamar(self.blp.bds, ticker, campo, overrides=overrides)
-        except Exception:
+        except Exception:                        # ticker inválido u override rechazado: sin TD para ese papel
             return pd.DataFrame()
         if d is None or len(d) == 0:
             return pd.DataFrame()
