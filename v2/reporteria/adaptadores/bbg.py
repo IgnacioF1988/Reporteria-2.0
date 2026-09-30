@@ -119,9 +119,24 @@ class XbbgBloomberg:
 
     def _llamar(self, fn, *args, **kw):
         ov = self._ov(kw.pop("overrides", {}) or {})
-        if self.nueva_api:
-            return fn(*args, overrides=ov, **kw) if ov else fn(*args, **kw)
+        if self.nueva_api:                       # ≥1.0: pandas explícito (el backend por defecto puede ser narwhals/arrow)
+            kw = {"backend": "pandas", **kw}
+            return self._a_pandas(fn(*args, overrides=ov, **kw) if ov else fn(*args, **kw))
         return fn(*args, **ov, **kw)
+
+    @staticmethod
+    def _a_pandas(res):
+        """Lo que devuelva xbbg → DataFrame de pandas (narwhals, pyarrow, polars o pandas)."""
+        if res is None or isinstance(res, pd.DataFrame):
+            return res
+        for metodo in ("to_pandas", "to_native"):
+            if hasattr(res, metodo):
+                out = getattr(res, metodo)()
+                if isinstance(out, pd.DataFrame):
+                    return out
+                if hasattr(out, "to_pandas"):
+                    return out.to_pandas()
+        return pd.DataFrame(res)
 
     @staticmethod
     def _valor(v):
@@ -186,7 +201,7 @@ class XbbgBloomberg:
         out = {}
         if self.nueva_api:
             try:
-                res = self.blp.bdh(tickers=list(tickers), flds=campo, start_date=fecha, end_date=fecha)
+                res = self._llamar(self.blp.bdh, tickers=list(tickers), flds=campo, start_date=fecha, end_date=fecha)
                 out.update(self._puntual(res, campo))
             except Exception:
                 pass

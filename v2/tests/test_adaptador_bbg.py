@@ -37,25 +37,38 @@ def test_cache_bds_y_bdp_preguntan_una_sola_vez(tmp_path):
     assert bbg.bdp(["A Corp"], "YAS_BOND_YLD", settle_dt="20260731").tolist() == [5.0] and inner.llamadas == 2
 
 
+class Envuelto:
+    """Imita un DataFrame narwhals: no es pandas, pero se convierte con to_native()/to_pandas()."""
+
+    def __init__(self, df):
+        self._df = df
+
+    def __len__(self):
+        return len(self._df)
+
+    def to_native(self):
+        return self._df
+
+
 class BlpNuevo:
-    """Imita xbbg ≥ 1.0: respuestas largas y overrides solo por `overrides=` en mayúsculas."""
+    """Imita xbbg ≥ 1.0: respuestas largas envueltas, overrides solo por `overrides=` en mayúsculas, backend explícito."""
 
     def __init__(self):
         self.llamadas = []
 
-    def bdp(self, tickers, flds, overrides=None, **kw):
-        assert not kw and all(k.isupper() for k in (overrides or {})), (kw, overrides)
+    def bdp(self, tickers, flds, overrides=None, backend=None, **kw):
+        assert backend == "pandas" and not kw and all(k.isupper() for k in (overrides or {})), (backend, kw, overrides)
         self.llamadas.append(("bdp", tuple(tickers), flds, overrides))
         filas = [(t, flds, "5.25" if t != "X Corp" else "") for t in tickers] + [("__SECURITY_ERROR__", flds, "1")]
-        return pd.DataFrame(filas, columns=["ticker", "field", "value"])
+        return Envuelto(pd.DataFrame(filas, columns=["ticker", "field", "value"]))
 
-    def bds(self, ticker, flds, overrides=None, **kw):
-        assert overrides == {"SETTLE_DT": "20260731", "BQ_FACE_AMT": "1000"}, overrides
-        return pd.DataFrame({"ticker": [ticker], "field": [flds], "Payment Date": ["2027-01-01"], "Coupon Amount": ["25"], "Principal Amount": ["1000"]})
+    def bds(self, ticker, flds, overrides=None, backend=None, **kw):
+        assert backend == "pandas" and overrides == {"SETTLE_DT": "20260731", "BQ_FACE_AMT": "1000"}, overrides
+        return Envuelto(pd.DataFrame({"ticker": [ticker], "field": [flds], "Payment Date": ["2027-01-01"], "Coupon Amount": ["25"], "Principal Amount": ["1000"]}))
 
-    def bdh(self, tickers, flds, start_date, end_date, **kw):
-        assert start_date == end_date == "20260731"
-        return pd.DataFrame([(t, "2026-07-31", flds, "4.33") for t in tickers], columns=["ticker", "date", "field", "value"])
+    def bdh(self, tickers, flds, start_date, end_date, backend=None, **kw):
+        assert start_date == end_date == "20260731" and backend == "pandas"
+        return Envuelto(pd.DataFrame([(t, "2026-07-31", flds, "4.33") for t in tickers], columns=["ticker", "date", "field", "value"]))
 
 
 class BlpViejo:
