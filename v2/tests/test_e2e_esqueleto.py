@@ -86,7 +86,8 @@ def test_corrida_muestra(rutas, bbg, fx):
     assert len(exc) >= 30 and (exc["CalcType"] == "PROP").all()
     assert _fila(pos, "527-1", 20)["Fuente"] == "EXCEPCIONES"                             # BAUZA LOAN, flujos del PM
     assert (pos["Origen"].str.startswith("HERMANO:")).any()
-    assert (al["Nombre"] == "FALTANTE").any()                                              # lo que solo BBG/TD resuelven (H3)
+    assert (pos["Fuente"] == "BBG").sum() >= 85 and (pos["Fuente"] == "CSHF").sum() >= 3        # H3 desde caché legacy
+    assert (al["Nombre"] == "FALTANTE").any()                                              # lo que no está en caché
 
     # Cada fuente elegida existe como candidato válido; Excel escrito
     cand = res.candidatos[res.candidatos["Valido"]]

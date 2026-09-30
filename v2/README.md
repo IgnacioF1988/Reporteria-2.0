@@ -24,8 +24,23 @@ copy .env.example .env         # completar rutas y credenciales
 reporteria check  --fecha 20260731            # inputs, REGLAS.xlsx y cierre anterior
 reporteria correr --fecha 20260731            # corrida completa → 02_OUTPUTS/20260731/REPORTE_20260731.xlsx
 reporteria correr --fecha 20260731 --sin-bbg  # sin terminal: usa la caché de 04_CACHE/20260731
+reporteria importar-cache-legacy --fecha 20260731 --legacy ..   # siembra la caché desde METRICAS/CSHF del repo legacy
 ```
 Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input obligatorio o REGLAS inválido.
+
+## Cascada de fuentes (por `Tratamiento` del bucket)
+| Tratamiento | Orden | Qué consume terminal |
+|---|---|---|
+| `CASCADA` (renta fija) | EXCEPCIONES → JPM → RA → **BBG YAS** → **CSHF** (TD de Bloomberg) → **JSONL** (TD propia desde Geneva) | BBG y CSHF solo para lo que sigue pendiente y no es DEF |
+| `CAJA` | EXCEPCIONES → RA → JPM → regla `cajas` (índice + spread) | nada |
+| `FACTURA` | EXCEPCIONES → RPT de facturas | nada |
+| `CERO` / `EXCLUIR` | yield 0 / fuera de métricas | nada |
+
+Toda métrica de proveedor pasa por sanidad (`yield_min/max_proveedor`, duration > 0) antes de elegirse; lo descartado queda
+en `candidatos` con su motivo. Las posiciones hedgeadas (`Hedge_Currency` por fondo) reciben además `Yield_XCCY`
+(`YAS_XCCY_FIXED_COUPON_EQUIVALENT`), que en H4 se compara con el drop. Cada consulta a Bloomberg queda en
+`04_CACHE/{FECHA}/` como CSV: `bdp_{campo}_{fecha}[_override-valor].csv`, `bdh_{campo}_{fecha}.csv`,
+`bds_{campo}/{ticker}.csv`.
 
 ## Estructura de carpetas (raíz = `REPORTERIA_RAIZ` o la carpeta padre del paquete)
 ```

@@ -52,5 +52,18 @@ def correr(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | 
     raise typer.Exit(1 if criticas else 0)
 
 
+@app.command("importar-cache-legacy")
+def importar_cache_legacy_cmd(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"),
+                              legacy: Path = typer.Option(..., help="Carpeta con METRICAS_/CSHF_ del legacy (o su 02_OUTPUTS)"),
+                              raiz: Path | None = None):
+    """Siembra 04_CACHE/{FECHA} con las respuestas Bloomberg del pipeline legacy para correr sin terminal."""
+    from .legado import importar_cache_legacy
+    r = Rutas.desde_env(fecha, raiz)
+    n = importar_cache_legacy(legacy, r.cache, fecha)
+    for k, v in n.items():
+        typer.echo(f"  {k:32} {v:>6}")
+    typer.echo(f"caché en {r.cache}")
+
+
 if __name__ == "__main__":
     app()

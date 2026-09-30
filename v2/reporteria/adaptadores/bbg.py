@@ -11,6 +11,11 @@ import pandas as pd
 class Bloomberg(Protocol):
     def bdp(self, tickers: list[str], campo: str, **overrides) -> pd.Series: ...        # puntual; index=ticker
     def historico(self, tickers: list[str], campo: str, fecha: str) -> pd.Series: ...  # valor del campo AL cierre
+    def bds(self, ticker: str, campo: str, **overrides) -> pd.DataFrame: ...           # bulk (tablas de desarrollo, curvas)
+
+
+def _ruta_bds(dir_cache: Path, campo: str, ticker: str) -> Path:
+    return dir_cache / f"bds_{campo}" / (re.sub(r"[^A-Za-z0-9@._ -]", "_", ticker) + ".csv")
 
 
 def _archivo(dir_cache: Path, campo: str, fecha: str, overrides: dict, tipo: str = "bdp") -> Path:
@@ -42,6 +47,11 @@ class FixtureBloomberg:
         s = self._leer(campo, {}, "bdh")
         return s[s.index.isin(tickers)]
 
+    def bds(self, ticker, campo, **overrides):
+        self.pedidos.append((f"bds:{campo}", (ticker,)))
+        p = _ruta_bds(self.dir, campo, ticker)
+        return pd.read_csv(p) if p.exists() else pd.DataFrame()
+
 
 class CacheBloomberg(FixtureBloomberg):
     """Lee de caché y consulta a `inner` solo lo que falta, guardándolo."""
@@ -69,6 +79,16 @@ class CacheBloomberg(FixtureBloomberg):
         self.pedidos.append((f"{campo}@{fecha}", tuple(tickers)))
         return self._completar(tickers, campo, {}, "bdh", lambda f: self.inner.historico(f, campo, fecha))
 
+    def bds(self, ticker, campo, **overrides):
+        self.pedidos.append((f"bds:{campo}", (ticker,)))
+        p = _ruta_bds(self.dir, campo, ticker)
+        if p.exists():
+            return pd.read_csv(p)
+        d = self.inner.bds(ticker, campo, **overrides)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        d.to_csv(p, index=False)          # también la respuesta vacía: evita repreguntar
+        return d
+
 
 class XbbgBloomberg:
     """Terminal real vía xbbg. Import diferido: solo existe en Windows con terminal."""
@@ -89,6 +109,13 @@ class XbbgBloomberg:
                     if pd.notna(v):
                         out[str(t).strip()] = float(v)
         return pd.Series(out, dtype=float)
+
+    def bds(self, ticker, campo, **overrides):
+        try:
+            d = self.blp.bds(ticker, campo, **overrides)
+        except Exception:
+            return pd.DataFrame()
+        return pd.DataFrame() if d is None else d.reset_index(drop=True)
 
     def historico(self, tickers, campo, fecha):
         out = {}

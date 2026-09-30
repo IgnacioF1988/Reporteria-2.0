@@ -14,9 +14,17 @@ PROVEEDORES = {"JPM", "RA", "BBG", "CSHF", "JSONL", "EXCEPCIONES"}
 CALC_TYPE_FUENTE = {"FACTURA": "PROP", "CAJA": "PROP", "EXCEPCIONES": "PROP", "CSHF": "PROP", "JSONL": "PROP", "RA": "1", "CERO": "", "EXCLUIR": ""}
 
 
+def _con_valido_bool(cand: pd.DataFrame) -> pd.DataFrame:
+    """Tras concatenar frames vacíos, Valido puede quedar object: se fuerza a bool para poder filtrar y negar."""
+    cand = cand.copy()
+    if "Valido" in cand:
+        cand["Valido"] = cand["Valido"].fillna(False).astype(bool)
+    return cand
+
+
 def validar_candidatos(cand: pd.DataFrame, parametros: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Sanidad sobre métricas de proveedor: duration no positiva o yield fuera de rango invalidan el candidato."""
-    cand = cand.copy()
+    cand = _con_valido_bool(cand)
     if cand.empty:
         return cand, alertas.vacias()
     ymax, ymin = float(parametros.get("yield_max_proveedor", 1.0)), float(parametros.get("yield_min_proveedor", -0.5))
@@ -29,6 +37,17 @@ def validar_candidatos(cand: pd.DataFrame, parametros: dict) -> tuple[pd.DataFra
     al = alertas.emitir("PROVEEDOR_INVALIDO", "ALTA", malos.assign(Valor=malos["Fuente"] + ":" + malos["Motivo_Descarte"]),
                         "métrica de proveedor descartada por sanidad; la posición sigue a la siguiente fuente", valor="Valor") if len(malos) else alertas.vacias()
     return cand, al
+
+
+def pendientes_tras(pos: pd.DataFrame, cand: pd.DataFrame, es_def: pd.Series) -> set[str]:
+    """Pos_ID de tratamiento CASCADA sin candidato válido todavía y que no son default: lo único que consume terminal."""
+    con_valido = set(cand.loc[cand["Valido"].astype(bool), "Pos_ID"]) if len(cand) else set()
+    m = pos["Tratamiento"].eq("CASCADA") & ~pos["Pos_ID"].isin(con_valido) & ~es_def
+    return set(pos.loc[m, "Pos_ID"])
+
+
+def defaults(pos: pd.DataFrame, defaulted: pd.DataFrame | None, reglas_def: pd.DataFrame, settle) -> pd.Series:
+    return _defaults(pos, defaulted, reglas_def, settle)
 
 
 def _defaults(pos: pd.DataFrame, defaulted: pd.DataFrame | None, reglas_def: pd.DataFrame, settle) -> pd.Series:
@@ -53,6 +72,7 @@ def elegir(pos: pd.DataFrame, cand: pd.DataFrame, defaulted: pd.DataFrame | None
     if len(cero):        # entran al agregado con yield 0 y duration 0; deben quedar trazados como candidato
         cand = pd.concat([cand, pd.DataFrame([candidato(p, "CERO", 0.0, 0.0, origen="REGLAS/buckets", valido=True)
                                               for _, p in cero.iterrows()])], ignore_index=True)
+    cand = _con_valido_bool(cand)
     validos = cand[cand["Valido"]].copy()
     validos["_orden"] = [ORDEN.get(t, []).index(f) if f in ORDEN.get(t, []) else 99
                          for t, f in zip(validos["Pos_ID"].map(trat), validos["Fuente"])]

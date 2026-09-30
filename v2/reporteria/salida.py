@@ -12,7 +12,7 @@ COLS_CARTERA = ["Pos_ID", "ID_Fund", "Fondo", "PK2", "BalanceSheet", "Name_Instr
                 "Risk_Currency", "Moneda_PK2", "Investment_Type_Code", "Issue_Type_Code", "Coupon_Type_Code",
                 "Base_Name", "Familia", "ISIN_Hermanos", "Hedge_Currency", "Hedge_Origen", "Indice", "Overrides",
                 "BalSheetKey", "Bucket", "Bucket_Origen", "Bucket_Orden", "Ficha_FI", "FX_Exposure", "Tratamiento",
-                "Yield", "Duration", "Yield_Moneda", "Fuente", "Origen", "Etapa", "Estado", "Estado_DEF", "CalcType",
+                "Yield", "Duration", "Yield_Moneda", "Yield_XCCY", "Fuente", "Origen", "Etapa", "Estado", "Estado_DEF", "CalcType",
                 "CalcType_exportable", "Motivo", "TotalMVal", "MVBook", "AI", "LocalPrice", "Qty", "Factor"]
 
 

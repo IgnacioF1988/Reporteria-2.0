@@ -15,13 +15,17 @@ from .adaptadores.fx_sql import CacheFx, FixtureFx, FuenteFx
 from .escala import EscalaCfg
 from .fx import armar_fx
 from .config import Rutas
+from .fuentes.bbg_yas import candidatos_bbg
 from .fuentes.cajas import candidatos_cajas
+from .fuentes.cshf import candidatos_cshf
+from .fuentes.jsonl import candidatos_jsonl
 from .fuentes.excepciones import candidatos_excepciones
 from .fuentes.facturas import candidatos_facturas
 from .fuentes.jpm import candidatos_jpm
 from .fuentes.ra import candidatos_ra
 from .lectura import maestros as M
 from .lectura.cubo import leer_cubo
+from .lectura.geneva import leer_jsonl
 from .lectura.manuales import leer_excepciones, leer_facturas
 from .lectura.mercado import hoja_ra, leer_jpm, leer_paridades, leer_ra
 from .lectura.reglas import leer_reglas
@@ -43,6 +47,7 @@ class Resultado:
     candidatos: pd.DataFrame
     alertas: pd.DataFrame
     tds: pd.DataFrame = field(default_factory=pd.DataFrame)
+    bbg_pedidos: list = field(default_factory=list)
     resumen: dict = field(default_factory=dict)
     excel: Path | None = None
 
@@ -171,9 +176,31 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     cand = pd.concat([x for x in cands if len(x)], ignore_index=True) if any(len(x) for x in cands) else cands[0]
     cand, a = cascada.validar_candidatos(cand, reglas.parametros); al.append(a)
 
+    # ── Terminal y TD propias: solo para lo que sigue pendiente (ahorro de consultas) ──
     defaulted = _opcional("DEFAULTED", rutas.defaulted, M.leer_defaulted, log, al)
-    pos, cand, a = cascada.elegir(pos, cand, defaulted, reglas.defaulteados, rutas.settle,
-                                  int(reglas.parametros.get("yield_type_default", 15)))
+    es_def = cascada.defaults(pos, defaulted, reglas.defaulteados, rutas.settle).ne("")
+    yt_default = int(reglas.parametros.get("yield_type_default", 15))
+    pend = cascada.pendientes_tras(pos, cand, es_def)
+    log.info("pendientes para Bloomberg YAS: %d", len(pend))
+    c, xccy, a = candidatos_bbg(pos, pend, bbg, rutas.fecha, yt_default); al.append(a)
+    c, a2 = cascada.validar_candidatos(c, reglas.parametros); al.append(a2)
+    cand = pd.concat([cand, c], ignore_index=True) if len(c) else cand
+    pos["Yield_XCCY"] = pos["Pos_ID"].map(xccy.set_index("Pos_ID")["Yield_XCCY"]) if len(xccy) else float("nan")
+    pend = cascada.pendientes_tras(pos, cand, es_def)
+    log.info("pendientes para CSHF (DES_CASH_FLOW): %d", len(pend))
+    c, t, a = candidatos_cshf(pos, pend, bbg, fx_bee, fx_par, rutas.settle, _escala_cfg(reglas.parametros)); al.append(a)
+    c, a2 = cascada.validar_candidatos(c, reglas.parametros); al.append(a2)
+    cand = pd.concat([cand, c], ignore_index=True) if len(c) else cand
+    tds = pd.concat([tds, t], ignore_index=True) if len(t) else tds
+    pend = cascada.pendientes_tras(pos, cand, es_def)
+    log.info("pendientes para JSONL (Geneva): %d", len(pend))
+    recs = _opcional("bond_schedule", rutas.jsonl, leer_jsonl, log, al) or {}
+    c, t, a = candidatos_jsonl(pos, pend, recs, homol, fx_bee, fx_par, rutas.settle, _escala_cfg(reglas.parametros)); al.append(a)
+    c, a2 = cascada.validar_candidatos(c, reglas.parametros); al.append(a2)
+    cand = pd.concat([cand, c], ignore_index=True) if len(c) else cand
+    tds = pd.concat([tds, t], ignore_index=True) if len(t) else tds
+
+    pos, cand, a = cascada.elegir(pos, cand, defaulted, reglas.defaulteados, rutas.settle, yt_default)
     al.append(a)
     yld_flag = M.leer_yld_flag(rutas.bd_yld_flag) if Path(rutas.bd_yld_flag).exists() else {}
     pos["CalcType_exportable"] = pos["CalcType"].map(yld_flag).fillna(pos["CalcType"])
@@ -197,4 +224,4 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     excel = salida.escribir_excel(hojas, rutas.excel_final)
     (rutas.outputs / f"resumen_corrida_{rutas.fecha}.json").write_text(json.dumps(resumen, ensure_ascii=False, indent=2, default=str))
     log.info("listo en %.1fs → %s", resumen["segundos"], excel)
-    return Resultado(pos, cand, todas, tds, resumen, excel)
+    return Resultado(pos, cand, todas, tds, getattr(bbg, 'pedidos', []), resumen, excel)

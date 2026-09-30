@@ -1,6 +1,6 @@
 """Construye tests/fixtures/mini/ a partir de los maestros corporativos entregados (tests/fixtures/corporativo/).
 
-    python tests/fixtures/construir_fixtures.py
+    PYTHONPATH=. python tests/fixtures/construir_fixtures.py   # desde v2/
 
 Recorta BD_INSTRUMENTOS y HOMOL a los instrumentos de la muestra del CUBO (el maestro completo tarda ~30 s en
 leerse), copia las dimensiones chicas tal cual, arma un REGLAS.xlsx inicial (cajas desde Template_Cajas, las
@@ -152,12 +152,56 @@ def main():
     leg[["ID_Fund", "PK2", "Moneda", "sP", "sQ", "Escalar_flag", "FX_usado", "Q_real", "FI_local", "Yield_efectiva", "ModDur"]].to_csv(
         MINI / "golden_excepciones_20260731.csv", index=False)
 
-    # Caché BBG de fixture: niveles de los índices de referencia de cajas (PX_LAST, en %, como los entrega BBG)
+    # bond_schedule.jsonl recortado a los códigos GENEVA de la muestra + casos documentados
+    import json
+    CASOS = {"RECARR 9.67 08/10/38 19", "CASH URUGUA 13.50 09/20/26", "PATIO PERU 9.00 29032045", "FUNOMM 9.2 11/29/27 17",
+             "SOLFACIL 16.48 01/15/34", "SOLFACIL 5.70 05/08/35", "AGROVISION 0% 19/09/2026", "CONMEX 5.95 12/15/35 REGS",
+             "Titularice - Avista 01", "Titularice - Kredit 02", "RDEDOR 11.82 01/13/28 10", "TOWER ONE COLOMBIA Loan B 12/13/26",
+             "ARGENT V0 12/15/35 GDP$"}
+    codes = set(homol[(homol["ID_Instrumento"].isin(ids)) & (homol["Source"] == "GENEVA")]["SourceInvestment"].astype(str)) | CASOS
+    with open(CORP / "bond_schedule.jsonl", encoding="utf-8") as f, open(MINI / "bond_schedule.jsonl", "w", encoding="utf-8") as g:
+        for line in f:
+            if line.strip() and json.loads(line).get("code") in codes:
+                g.write(line if line.endswith("\n") else line + "\n")
+
+    # Caché BBG: YAS / XCCY / DES_CASH_FLOW desde los outputs legacy de julio + niveles de índices de cajas
+    from reporteria.legado import importar_cache_legacy
     bbg = MINI / "bbg_cache"; bbg.mkdir(exist_ok=True)
+    for old in bbg.glob("bdp_*.csv"):
+        old.unlink()
+    print("caché legacy:", importar_cache_legacy(CORP, bbg, FECHA))
     pd.DataFrame([("OBFR01 Index", 4.33), ("FEDL01 Index", 4.33), ("ESTRON Index", 1.92), ("SONIO/N Index", 4.00),
                   ("MXIBTIIE Index", 7.75), ("CABROVER Index", 2.75), ("NIBOR1W Index", 4.30)],
                  columns=["ticker", "valor"]).to_csv(bbg / f"bdh_PX_LAST_{FECHA}.csv", index=False)
     print(f"mini listo: {len(mini_bd)} instrumentos, {n} facturas, {len(cajas)} filas de cajas")
+
+    # ── casos_legacy: posiciones con TD propia documentadas (golden de JSONL / CSHF) ──
+    CAS = AQUI / "casos_legacy"; CAS.mkdir(exist_ok=True)
+    full = pd.read_excel(CORP / "LEGACY_CUBO_COMPLETO_20260731.xlsx")
+    full["PK2"] = full["PK2"].astype(str).str.strip()
+    llaves = [("201936-175", 17), ("166894-135", 17), ("166894-135", 20), ("189238-1", 17), ("29844-194", 17), ("153765-41", 17),
+              ("132057-41", 17), ("991-29", 17), ("480-1", 17), ("116575-41", 17)]
+    sel = pd.concat([full[(full["PK2"] == pk2) & (full["ID_Fund"] == fid)] for pk2, fid in llaves]).drop_duplicates(["PK2", "ID_Fund", "BalanceSheet"])
+    sel = sel.rename(columns={"Fund_Name": "FundShortName"})
+    sel["id_CURR"] = sel["PK2"].str.split("-").str[1].astype(int)
+    sel[["PK2", "ID_Fund", "ID_Instrumento", "id_CURR", "BalanceSheet", "Source", "LocalPrice", "Qty", "OriginalFace", "Factor", "AI",
+         "MVBook", "TotalMVal"]].to_excel(CAS / f"CUBO_{FECHA}.xlsx", index=False)
+    ids_c = set(sel["ID_Instrumento"])
+    with pd.ExcelWriter(CAS / "BD_INSTRUMENTOS.xlsx") as w:
+        bd[bd["ID_Instrumento"].isin(ids_c)].drop(columns="PK2").to_excel(w, sheet_name="BD_INSTRUMENTOS", index=False)
+    homol[homol["ID_Instrumento"].isin(ids_c)].to_excel(CAS / "HOMOL_INSTRUMENTOS.xlsx", index=False)
+    for f in COPIAR + ["REGLAS.xlsx", "bond_schedule.jsonl", f"fx_beemining_{FECHA}.csv", "4- Carga de paridades.xlsx"]:
+        (CAS / f).write_bytes((MINI / f).read_bytes())
+    (CAS / "bbg_cache").mkdir(exist_ok=True)
+    for f in (MINI / "bbg_cache").glob("*.csv"):
+        (CAS / "bbg_cache" / f.name).write_bytes(f.read_bytes())
+    leg = pd.read_excel(CORP / "LEGACY_PROP_JSONL_20260731.xlsx", sheet_name="metricas")
+    leg[["ID_Fund", "PK2", "Tipo_bono", "Moneda", "Escalar_flag", "sP", "sQ", "Q_real", "FI_local", "Yield_efectiva", "ModDur"]].to_csv(
+        CAS / "golden_jsonl_20260731.csv", index=False)
+    legc = pd.read_excel(CORP / "LEGACY_CSHF_20260731.xlsx", sheet_name="resueltos")
+    legc[["ID_Fund", "PK2", "ISIN", "Moneda", "Escalar_flag", "sP", "sQ", "face_bbg", "Q_real", "CSHF_Yield_efec", "CSHF_ModDur"]].to_csv(
+        MINI / "golden_cshf_20260731.csv", index=False)
+    print(f"casos_legacy listo: {len(sel)} posiciones")
 
 
 if __name__ == "__main__":
