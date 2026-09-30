@@ -54,25 +54,26 @@
     76
   ],
   "estado": {
-    "FALTANTE": 3839,
-    "RESUELTO": 3358
+    "RESUELTO": 6306,
+    "FALTANTE": 891
   },
   "fuente": {
+    "FACTURA": 2810,
     "CERO": 1636,
     "JPM": 600,
     "BBG": 402,
     "RA": 261,
     "CAJA": 244,
+    "REGLA_DEF": 205,
     "EXCEPCIONES": 92,
-    "CSHF": 73,
-    "REGLA_DEF": 42,
-    "JSONL": 8
+    "CSHF": 50,
+    "JSONL": 6
   },
   "conversion": {
     "BREAKEVEN": 244,
-    "XCCY": 105,
-    "DROP": 26,
-    "PROVEEDOR_NOMINAL": 5,
+    "XCCY": 104,
+    "DROP": 24,
+    "PROVEEDOR_NOMINAL": 7,
     "SUMA_INDICE": 5
   },
   "bucket": {
@@ -93,13 +94,13 @@
     "2": 1.0,
     "8": 1.0,
     "11": 0.9906,
-    "13": 0.9967,
+    "13": 1.0,
     "14": 1.0,
     "15": 1.0,
-    "16": 0.9759,
-    "17": 0.9723,
+    "16": 0.9961,
+    "17": 0.9874,
     "19": 1.0,
-    "20": 0.8438,
+    "20": 0.864,
     "23": 0.0621,
     "25": 1.0,
     "26": 1.0,
@@ -125,12 +126,12 @@
     "53": 1.0,
     "57": 0.9623,
     "58": 1.0,
-    "59": 0.9786,
-    "62": 0.162,
+    "59": 0.9966,
+    "62": 0.7062,
     "64": 0.4182,
-    "65": 0.9923,
+    "65": 0.9957,
     "67": 0.3507,
-    "68": 0.9984,
+    "68": 0.9987,
     "69": 0.0006,
     "70": 1.0,
     "71": 1.0,
@@ -142,20 +143,20 @@
   },
   "aw_dw_patrimonio": {
     "2": [
-      0.198963,
-      0.117196
+      0.192621,
+      0.113813
     ],
     "8": [
       0.0,
       null
     ],
     "11": [
-      0.064232,
-      0.067243
+      0.063961,
+      0.066821
     ],
     "13": [
-      0.017198,
-      0.174008
+      0.016264,
+      0.165477
     ],
     "14": [
       0.0,
@@ -166,20 +167,20 @@
       null
     ],
     "16": [
-      0.081066,
-      0.082092
+      0.079218,
+      0.081043
     ],
     "17": [
-      0.130875,
-      0.123747
+      0.127199,
+      0.122461
     ],
     "19": [
       0.0,
       null
     ],
     "20": [
-      0.075283,
-      0.098084
+      0.067799,
+      0.093075
     ],
     "23": [
       0.0,
@@ -274,20 +275,20 @@
       null
     ],
     "57": [
-      0.199902,
-      0.117223
+      0.193561,
+      0.11391
     ],
     "58": [
       0.0,
       null
     ],
     "59": [
-      0.079059,
-      0.082173
+      0.077738,
+      0.081245
     ],
     "62": [
-      0.000243,
-      0.003718
+      0.052342,
+      0.090848
     ],
     "64": [
       0.0,
@@ -295,15 +296,15 @@
     ],
     "65": [
       0.0858,
-      0.081925
+      0.081885
     ],
     "67": [
       0.0,
       null
     ],
     "68": [
-      0.081485,
-      0.076811
+      0.081162,
+      0.076674
     ],
     "69": [
       0.0,
@@ -339,25 +340,32 @@
     ]
   },
   "alertas": {
-    "ALTA|CAJA_SIN_REGLA": 178,
+    "ALTA|CAJA_SIN_REGLA": 176,
     "ALTA|COBERTURA_BAJA": 8,
-    "ALTA|FALTANTE": 3839,
-    "ALTA|INSUMO_FALTANTE": 1,
+    "ALTA|DEFAULT_CON_AI": 8,
+    "ALTA|FALTANTE": 891,
     "ALTA|MONEDA_SIN_CURVAS_DROP": 1,
-    "ALTA|SIN_BREAKEVEN": 3,
-    "ALTA|SIN_CONVERSION_HEDGE": 5,
+    "ALTA|SIN_BREAKEVEN": 1,
+    "ALTA|SIN_CONVERSION_HEDGE": 6,
     "ALTA|YIELD_NEGATIVA": 16,
-    "CRITICA|YIELD_ALTA": 84,
+    "CRITICA|YIELD_ALTA": 67,
     "INFO|CURVA_EXTRAPOLADA": 71,
+    "INFO|FACTURA_ASOF_REVERTIDA": 9,
+    "INFO|FACTURA_SIN_POSICION": 1,
+    "INFO|FACTURA_TASA_PRORROGA": 2,
     "INFO|FAMILIA_INFERIDA": 74,
     "INFO|FLOTANTE_PROVEEDOR": 5,
-    "MEDIA|BONO_SIN_AI": 144,
+    "INFO|INDICE_SIN_CURVA": 2,
+    "INFO|RA_TIR_MENSUAL": 7,
+    "MEDIA|BONO_SIN_AI": 124,
     "MEDIA|CAJA_SIN_VALOR": 42,
-    "MEDIA|ESCALA_FALLBACK": 50,
+    "MEDIA|ESCALA_FALLBACK": 23,
+    "MEDIA|FACTURA_MONTO_DISTINTO": 332,
     "MEDIA|HEDGE_NUEVO": 354,
     "MEDIA|HEDGE_PAIS_SIN_MONEDA": 94,
     "MEDIA|HEDGE_PAPEL_NO_USD": 4,
-    "MEDIA|PROVEEDOR_INVALIDO": 63,
+    "MEDIA|PROVEEDOR_INVALIDO": 39,
+    "MEDIA|XCCY_FUERA_RANGO": 1,
     "MEDIA|XCCY_VS_DROP": 39
   },
   "alertas_inactivas": [
@@ -368,5 +376,5 @@
     "HEDGE_CONVERTIDO",
     "SIN_TRATAMIENTO"
   ],
-  "segundos": 70.0
+  "segundos": 134.3
 }
