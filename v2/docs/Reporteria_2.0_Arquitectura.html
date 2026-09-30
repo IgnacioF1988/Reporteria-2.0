@@ -1,0 +1,426 @@
+<title>Reportería 2.0 Arquitectura</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Grilla: páginas apiladas de 1180px; cada figura es un SVG a escala 1 unidad = 1 pt en A3 apaisado. */
+:root{--bg:#ffffff;--fg:#16181d;--fg2:#3d434d;--line:#2b2f36;--grp:#8a9099;--sep:#c4c8cf;
+ --azul-f:#e8f0fb;--azul-s:#1f5fae;--ambar-f:#fdf1d8;--ambar-s:#a8680a;--num:#16181d;--numt:#ffffff;
+ --sans:"IBM Plex Sans","Segoe UI",Arial,sans-serif;--mono:"IBM Plex Mono",Consolas,monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#111317;--fg:#eceef1;--fg2:#c3c8d1;--line:#d0d4db;--grp:#7c8390;--sep:#3a3f48;
+ --azul-f:#16263d;--azul-s:#6ea8ec;--ambar-f:#33270f;--ambar-s:#e2a948;--num:#eceef1;--numt:#111317;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111317;--fg:#eceef1;--fg2:#c3c8d1;--line:#d0d4db;--grp:#7c8390;--sep:#3a3f48;
+ --azul-f:#16263d;--azul-s:#6ea8ec;--ambar-f:#33270f;--ambar-s:#e2a948;--num:#eceef1;--numt:#111317;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.5;margin:0}
+main{max-width:1180px;margin:0 auto;padding-block:28px 48px;padding-inline:16px}
+.page{display:grid;gap:10px;padding-block:24px 36px;border-bottom:1px solid var(--sep)}
+.page:last-child{border-bottom:0}
+h1{font-size:34px;font-weight:600;margin:0;line-height:1.2;text-wrap:balance}
+h2{font-size:22px;font-weight:600;margin:0;line-height:1.25}
+.sub{color:var(--fg2);font-size:15px;max-width:80ch;margin:0}
+.eyebrow{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--fg2);font-weight:500;margin:0}
+.fig{overflow-x:auto}
+svg{display:block;width:100%;max-width:1100px;min-width:900px;height:auto;font-family:var(--sans)}
+.mono,code{font-family:var(--mono)}
+code{font-size:.92em}
+.bx{fill:var(--bg);stroke:var(--line);stroke-width:1.2}
+.bx-azul{fill:var(--azul-f);stroke:var(--azul-s)}
+.bx-ambar{fill:var(--ambar-f);stroke:var(--ambar-s)}
+.bx-dash{stroke-dasharray:4 3}
+.chip{fill:var(--bg);stroke:var(--line);stroke-width:1.1}
+.grp{fill:none;stroke:var(--grp);stroke-width:1}
+.grp-azul{stroke:var(--azul-s);stroke-dasharray:5 3}
+.lblbg{fill:var(--bg)}
+.t{font-size:10.5px;fill:var(--fg)}
+.t2{font-size:9.5px;fill:var(--fg2)}
+.tt{font-size:12px;font-weight:600;fill:var(--fg)}
+.b{font-weight:600}
+.grp-l{font-size:9.5px;font-weight:600;letter-spacing:.08em;fill:var(--fg2)}
+.fl{fill:none;stroke:var(--line);stroke-width:1.2}
+.fl-azul{stroke:var(--azul-s)}
+.fl-dash{stroke-dasharray:5 3}
+.fl-l{font-size:9.5px;fill:var(--fg2);font-style:italic}
+.fl-l-azul{fill:var(--azul-s)}
+.mk{fill:var(--line)} .mk-azul{fill:var(--azul-s)}
+.sep{stroke:var(--sep);stroke-width:1}
+.num{fill:var(--num)} .numt{fill:var(--numt);font-weight:600}
+.portada{display:grid;gap:18px;padding-block:40px 60px}
+.portada ol{margin:0;padding-left:22px;display:grid;gap:8px;max-width:78ch}
+.portada .meta{color:var(--fg2);font-size:14px}
+table{border-collapse:collapse;width:100%;max-width:1000px;font-size:15px}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--sep);vertical-align:top}
+th{color:var(--fg2);font-weight:500;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+td:first-child{font-family:var(--mono);white-space:nowrap;font-size:14px}
+@media print{
+ :root{--bg:#ffffff;--fg:#16181d;--fg2:#3d434d;--line:#2b2f36;--grp:#8a9099;--sep:#c4c8cf;--azul-f:#e8f0fb;--azul-s:#1f5fae;--ambar-f:#fdf1d8;--ambar-s:#a8680a;--num:#16181d;--numt:#ffffff}
+ @page{size:A3 landscape;margin:12mm 12mm 12mm 12mm}
+ main{max-width:none;padding:0}
+ .page{break-after:page;border:0;padding:0;gap:6pt}
+ .page:last-child{break-after:auto}
+ .fig{overflow:visible}
+ svg{width:1100pt;max-width:none;min-width:0}
+ h1{font-size:30pt} h2{font-size:22pt} .sub{font-size:12.5pt} body{font-size:12pt}
+ .portada{padding-top:120pt}
+}
+</style>
+<main>
+<section class="page portada">
+<p class="eyebrow">Reportería 2.0 · paquete <code>reporteria</code> v2 · 2026-09-30</p>
+<h1>Arquitectura del pipeline de Yield y Duration</h1>
+<p class="sub">Tres figuras y una tabla para leer el sistema sin abrir el código: de dónde entran los datos y a dónde salen, qué le pasa a cada posición dentro de una corrida, y qué hace el operador cada cierre.</p>
+<ol>
+<li><strong>Arquitectura.</strong> Los insumos se leen donde están; el motor calcula todo en memoria y solo sale de la máquina por dos adaptadores, siempre a través de la caché del cierre.</li>
+<li><strong>Flujo de una posición.</strong> El tratamiento del bucket fija el orden de fuentes; gana la primera válida y los overrides de valor pisan todo.</li>
+<li><strong>Ciclo del operador.</strong> Una sola corrida con terminal por cierre; lo demás se repite sobre la caché hasta cerrar, sin editar código.</li>
+<li><strong>Dónde vive cada decisión.</strong> Qué se cambia en <code>.env</code>, en <code>REGLAS.xlsx</code>, en <code>config.py</code>, en los maestros corporativos y en la caché.</li>
+</ol>
+<p class="meta">Colores: el azul marca lo que sale de la máquina o consume la terminal Bloomberg; el ámbar, lo que llega al agregado sin métrica propia. Todo lo demás es neutro.</p>
+</section>
+<section class="page">
+<h2>1. Arquitectura: insumos, motor y salidas</h2>
+<p class="sub">Los insumos se leen donde están; el motor calcula todo en memoria y solo sale de la máquina por dos adaptadores, siempre a través de la caché del cierre.</p>
+<div class="fig"><svg viewBox="0 0 1100 688" role="img" aria-label="Insumos, motor, adaptadores y salidas del pipeline" width="1100" height="688">
+<defs>
+<marker id="mn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+<marker id="mazul" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk mk-azul"/></marker>
+</defs>
+<text class="grp-l" x="0" y="10">INSUMOS · SOLO LECTURA · RUTAS EN .ENV</text>
+<rect id="b1" class="bx" x="0" y="18" width="300" height="136" rx="3"/>
+<text class="tt" x="12" y="39" data-in="b1">CORPORATIVO / BIX</text>
+<text class="t2" x="12" y="55" data-in="b1">Obligatorios</text>
+<text class="t" x="12" y="69" data-in="b1"><tspan class="mono">CUBO_{F}.xlsx</tspan>  posiciones del cierre</text>
+<text class="t" x="12" y="83" data-in="b1"><tspan class="mono">BD_INSTRUMENTOS</tspan> · <tspan class="mono">BD_FUNDS</tspan></text>
+<text class="t" x="12" y="97" data-in="b1"><tspan class="mono">BD_BalanceSheet</tspan> · <tspan class="mono">BD_Monedas</tspan></text>
+<text class="t2" x="12" y="111" data-in="b1">Opcionales</text>
+<text class="t" x="12" y="125" data-in="b1"><tspan class="mono">HOMOL_INSTRUMENTOS</tspan> · <tspan class="mono">HOMOL_FUNDS</tspan></text>
+<text class="t" x="12" y="139" data-in="b1"><tspan class="mono">DEFAULTED</tspan> · <tspan class="mono">BD_FX_Exposure</tspan></text>
+<rect id="b2" class="bx" x="0" y="168" width="300" height="122" rx="3"/>
+<text class="tt" x="12" y="189" data-in="b2">MERCADO</text>
+<text class="t" x="12" y="205" data-in="b2"><tspan class="mono">JPM_CEMBI_GBI</tspan>  yields de JPM</text>
+<text class="t" x="12" y="219" data-in="b2"><tspan class="mono">RA_TIR</tspan>  RiskAmerica</text>
+<text class="t" x="12" y="233" data-in="b2"><tspan class="mono">FACTURAS</tspan>  RPT de Facts</text>
+<text class="t" x="12" y="247" data-in="b2"><tspan class="mono">Carga_Indexes</tspan>  curvas reales</text>
+<text class="t" x="12" y="261" data-in="b2"><tspan class="mono">Carga_CurvasSoberanas</tspan>  curvas nominales</text>
+<text class="t" x="12" y="275" data-in="b2"><tspan class="mono">4- Carga de paridades</tspan>  tipos de cambio</text>
+<rect id="b3" class="bx" x="0" y="304" width="300" height="108" rx="3"/>
+<text class="tt" x="12" y="325" data-in="b3">MANUALES · los mantiene el operador</text>
+<text class="t" x="12" y="341" data-in="b3"><tspan class="mono">REGLAS.xlsx</tspan>  9 hojas, todo por <tspan class="mono">ID_Fund</tspan>:</text>
+<text class="t2" x="12" y="355" data-in="b3"><tspan class="mono">fondos</tspan> <tspan class="mono">buckets</tspan> <tspan class="mono">clasificacion</tspan> <tspan class="mono">cajas</tspan></text>
+<text class="t2" x="12" y="369" data-in="b3"><tspan class="mono">defaulteados</tspan> <tspan class="mono">overrides_valor</tspan></text>
+<text class="t2" x="12" y="383" data-in="b3"><tspan class="mono">overrides_atributo</tspan> <tspan class="mono">alertas</tspan> <tspan class="mono">parametros</tspan></text>
+<text class="t" x="12" y="397" data-in="b3"><tspan class="mono">EXCEPCIONES_*.xlsx</tspan>  flujos del PM</text>
+<rect id="b4" class="bx" x="0" y="426" width="300" height="52" rx="3"/>
+<text class="tt" x="12" y="447" data-in="b4">GENEVA</text>
+<text class="t" x="12" y="463" data-in="b4"><tspan class="mono">bond_schedule.jsonl</tspan>  eventos de bonos</text>
+<rect id="b5" class="bx bx-dash" x="0" y="492" width="300" height="66" rx="3"/>
+<text class="tt" x="12" y="513" data-in="b5">CIERRE ANTERIOR</text>
+<text class="t" x="12" y="529" data-in="b5"><tspan class="mono">02_OUTPUTS/{F-1}/REPORTE_{F-1}.xlsx</tspan></text>
+<text class="t2" x="12" y="543" data-in="b5">hedge heredado · alertas A05–A07</text>
+<line class="fl" x1="300" y1="86" x2="322" y2="86"/>
+<line class="fl" x1="300" y1="229" x2="322" y2="229"/>
+<line class="fl" x1="300" y1="358" x2="322" y2="358"/>
+<line class="fl" x1="300" y1="452" x2="322" y2="452"/>
+<line class="fl" x1="300" y1="525" x2="322" y2="525"/>
+<line class="fl" x1="322" y1="86" x2="322" y2="525"/>
+<polyline class="fl" points="322,250 350,250" marker-end="url(#mn)"/>
+<rect class="lblbg" x="325.0" y="233" width="22.0" height="14"/>
+<text class="fl-l" x="336" y="243" text-anchor="middle">lee</text>
+<rect id="b6" class="bx" x="350" y="0" width="400" height="66" rx="3"/>
+<text class="tt" x="362" y="21" data-in="b6">CLI (typer)</text>
+<text class="t" x="362" y="37" data-in="b6"><tspan class="mono">check</tspan> · <tspan class="mono">correr [--sin-bbg --sin-sql]</tspan> · <tspan class="mono">comparar</tspan></text>
+<text class="t" x="362" y="51" data-in="b6"><tspan class="mono">migrar-manuales</tspan> · <tspan class="mono">importar-cache-legacy</tspan></text>
+<polyline class="fl" points="550,66 550,96" marker-end="url(#mn)"/>
+<rect class="lblbg" x="578.0" y="74" width="41.8" height="14"/>
+<text class="fl-l" x="582" y="84">invoca</text>
+<rect id="b7" class="grp" x="350" y="96" width="400" height="326" rx="4"/>
+<rect class="lblbg" x="358" y="89" width="285.2" height="14"/>
+<text class="grp-l" x="363" y="100">MOTOR · <tspan class="mono">reporteria.pipeline.correr(fecha)</tspan></text>
+<text class="t2" x="362" y="118" data-in="b7">en memoria · sin intermedios · unidades decimales (0,05 = 5 %)</text>
+<circle class="num" cx="372" cy="134" r="8"/><text class="numt" x="372" y="137.5" text-anchor="middle" data-in="b7" font-size="9">1</text>
+<text class="t" x="388" y="138" data-in="b7">universo: CUBO + maestro, familias REGS/144A, hedge por fondo</text>
+<circle class="num" cx="372" cy="156" r="8"/><text class="numt" x="372" y="159.5" text-anchor="middle" data-in="b7" font-size="9">2</text>
+<text class="t" x="388" y="160" data-in="b7">overrides de atributo (<tspan class="mono">REGLAS</tspan>)</text>
+<circle class="num" cx="372" cy="178" r="8"/><text class="numt" x="372" y="181.5" text-anchor="middle" data-in="b7" font-size="9">3</text>
+<text class="t" x="388" y="182" data-in="b7">clasificación: BalSheetKey → Bucket → Tratamiento</text>
+<circle class="num" cx="372" cy="200" r="8"/><text class="numt" x="372" y="203.5" text-anchor="middle" data-in="b7" font-size="9">4</text>
+<text class="t" x="388" y="204" data-in="b7">fuentes: cajas · facturas · EXCEPCIONES · JPM · RA</text>
+<text class="t" x="388" y="220" data-in="b7">   Bloomberg YAS · CSHF · JSONL (solo lo pendiente)</text>
+<circle class="num" cx="372" cy="238" r="8"/><text class="numt" x="372" y="241.5" text-anchor="middle" data-in="b7" font-size="9">5</text>
+<text class="t" x="388" y="242" data-in="b7">sanidad y cascada → Yield, Duration</text>
+<circle class="num" cx="372" cy="260" r="8"/><text class="numt" x="372" y="263.5" text-anchor="middle" data-in="b7" font-size="9">6</text>
+<text class="t" x="388" y="264" data-in="b7">índice · breakeven (indexados) · XCCY / drop (hedgeados)</text>
+<circle class="num" cx="372" cy="282" r="8"/><text class="numt" x="372" y="285.5" text-anchor="middle" data-in="b7" font-size="9">7</text>
+<text class="t" x="388" y="286" data-in="b7">overrides de valor (pisan todo)</text>
+<circle class="num" cx="372" cy="304" r="8"/><text class="numt" x="372" y="307.5" text-anchor="middle" data-in="b7" font-size="9">8</text>
+<text class="t" x="388" y="308" data-in="b7">alertas por reglas + estructurales</text>
+<circle class="num" cx="372" cy="326" r="8"/><text class="numt" x="372" y="329.5" text-anchor="middle" data-in="b7" font-size="9">9</text>
+<text class="t" x="388" y="330" data-in="b7">agregados Activos / Pasivos / Patrimonio</text>
+<circle class="num" cx="372" cy="348" r="8"/><text class="numt" x="372" y="351.5" text-anchor="middle" data-in="b7" font-size="9">10</text>
+<text class="t" x="388" y="352" data-in="b7">salida: Excel + JSON + log</text>
+<line class="sep" x1="362" y1="378" x2="738" y2="378"/>
+<text class="t2" x="362" y="396" data-in="b7">módulos puros: <tspan class="mono">finanzas</tspan> <tspan class="mono">escala</tspan> <tspan class="mono">td</tspan> <tspan class="mono">curvas</tspan> <tspan class="mono">conversion</tspan> <tspan class="mono">cascada</tspan> <tspan class="mono">agregados</tspan></text>
+<text class="t2" x="362" y="410" data-in="b7">110 tests, con goldens del pipeline legacy de julio</text>
+<rect id="b8" class="bx bx-azul" x="350" y="456" width="400" height="94" rx="3"/>
+<text class="tt" x="362" y="477" data-in="b8">ADAPTADORES · única frontera externa</text>
+<text class="t" x="362" y="493" data-in="b8"><tspan class="mono">Bloomberg</tspan>  bdp / bds / bdh vía xbbg</text>
+<text class="t" x="362" y="507" data-in="b8"><tspan class="mono">FuenteFx</tspan>  beemining (SQL)</text>
+<text class="t" x="362" y="521" data-in="b8"><tspan class="mono">CacheBloomberg</tspan>  lee la caché del cierre y pide</text>
+<text class="t" x="362" y="535" data-in="b8">solo lo que falta; guarda cada respuesta</text>
+<polyline class="fl" points="550,422 550,456" marker-end="url(#mn)"/>
+<rect class="lblbg" x="562.0" y="433" width="236.0" height="14"/>
+<text class="fl-l" x="566" y="443">consulta solo lo pendiente · nunca defaulteados</text>
+<text class="grp-l" x="790" y="10">SALIDAS POR CIERRE</text>
+<rect id="b9" class="bx" x="790" y="18" width="310" height="136" rx="3"/>
+<text class="tt" x="802" y="39" data-in="b9"><tspan class="mono">02_OUTPUTS/{F}/</tspan></text>
+<text class="t" x="802" y="55" data-in="b9"><tspan class="mono">REPORTE_{F}.xlsx</tspan>  13 hojas:</text>
+<text class="t2" x="802" y="69" data-in="b9"><tspan class="mono">resumen</tspan> <tspan class="mono">agregados</tspan> <tspan class="mono">alertas_resumen</tspan></text>
+<text class="t2" x="802" y="83" data-in="b9"><tspan class="mono">alertas</tspan> <tspan class="mono">faltantes</tspan> <tspan class="mono">plantilla_overrides</tspan></text>
+<text class="t2" x="802" y="97" data-in="b9"><tspan class="mono">cartera_final</tspan> <tspan class="mono">candidatos</tspan> <tspan class="mono">conversiones</tspan></text>
+<text class="t2" x="802" y="111" data-in="b9"><tspan class="mono">curvas_drop</tspan> <tspan class="mono">td_detalle</tspan> <tspan class="mono">reglas_aplicadas</tspan></text>
+<text class="t2" x="802" y="125" data-in="b9"><tspan class="mono">insumos</tspan></text>
+<text class="t" x="802" y="139" data-in="b9"><tspan class="mono">resumen_corrida_{F}.json</tspan></text>
+<rect id="b10" class="bx" x="790" y="168" width="310" height="52" rx="3"/>
+<text class="tt" x="802" y="189" data-in="b10"><tspan class="mono">03_LOGS/{F}/</tspan></text>
+<text class="t" x="802" y="205" data-in="b10"><tspan class="mono">corrida_{ts}.log</tspan>  conteos por etapa</text>
+<rect id="b11" class="bx" x="790" y="234" width="310" height="66" rx="3"/>
+<text class="tt" x="802" y="255" data-in="b11"><tspan class="mono">04_CACHE/{F}/</tspan></text>
+<text class="t" x="802" y="271" data-in="b11"><tspan class="mono">bdp_*.csv</tspan> · <tspan class="mono">bdh_*.csv</tspan> · <tspan class="mono">bds_*/</tspan> · <tspan class="mono">fx_*.csv</tspan></text>
+<text class="t2" x="802" y="285" data-in="b11">permite <tspan class="mono">correr --sin-bbg</tspan> idéntico</text>
+<rect id="b12" class="grp grp-azul" x="790" y="456" width="310" height="168" rx="4"/>
+<rect class="lblbg" x="798" y="449" width="144.4" height="14"/>
+<text class="grp-l" x="803" y="460">FUERA DE ESTA MÁQUINA</text>
+<rect id="b13" class="bx bx-azul" x="802" y="470" width="286" height="66" rx="3"/>
+<text class="tt" x="814" y="491" data-in="b13">Terminal Bloomberg</text>
+<text class="t" x="814" y="507" data-in="b13">xbbg → <tspan class="mono">bbcomm</tspan>, puerto 8194</text>
+<text class="t2" x="814" y="521" data-in="b13">solo en la estación Bloomberg</text>
+<rect id="b14" class="bx bx-azul" x="802" y="546" width="286" height="66" rx="3"/>
+<text class="tt" x="814" y="567" data-in="b14">beemining</text>
+<text class="t" x="814" y="583" data-in="b14">SQL vía ODBC</text>
+<text class="t2" x="814" y="597" data-in="b14">credenciales en <tspan class="mono">.env</tspan></text>
+<polyline class="fl" points="750,75 790,75" marker-end="url(#mn)"/>
+<rect class="lblbg" x="746.5" y="55" width="47.1" height="14"/>
+<text class="fl-l" x="770" y="65" text-anchor="middle">escribe</text>
+<polyline class="fl" points="750,194.0 790,194.0" marker-end="url(#mn)"/>
+<rect class="lblbg" x="746.5" y="174.0" width="47.1" height="14"/>
+<text class="fl-l" x="770" y="184.0" text-anchor="middle">escribe</text>
+<polyline class="fl" points="750,472 770,472 770,267.0 790,267.0" marker-end="url(#mn)"/>
+<text class="fl-l" x="778" y="330">lee la caché y escribe</text>
+<text class="fl-l" x="778" y="342">cada respuesta nueva</text>
+<polyline class="fl fl-azul" points="750,530 790,530" marker-end="url(#mazul)"/>
+<rect class="lblbg" x="743.8" y="510" width="52.4" height="14"/>
+<text class="fl-l fl-l-azul" x="770" y="520" text-anchor="middle">consulta</text>
+<rect class="bx bx-azul" x="0" y="582" width="18" height="12" rx="2"/><text class="t2" x="24" y="592">sale de la máquina / consume terminal Bloomberg</text><rect class="bx bx-ambar" x="0" y="600" width="18" height="12" rx="2"/><text class="t2" x="24" y="610">queda sin métrica propia</text>
+</svg></div>
+</section>
+<section class="page">
+<h2>2. Flujo de una posición dentro de la corrida</h2>
+<p class="sub">El tratamiento del bucket fija el orden de fuentes; gana la primera válida y los overrides de valor pisan todo.</p>
+<div class="fig"><svg viewBox="0 0 1100 634" role="img" aria-label="Recorrido de una posición: clasificación, cascada de fuentes, sanidad, conversión, overrides y estado final" width="1100" height="634">
+<defs>
+<marker id="mn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+<marker id="mazul" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk mk-azul"/></marker>
+</defs>
+<rect class="bx bx-azul" x="800" y="6" width="18" height="12" rx="2"/><text class="t2" x="824" y="16">sale de la máquina / consume terminal Bloomberg</text><rect class="bx bx-ambar" x="800" y="24" width="18" height="12" rx="2"/><text class="t2" x="824" y="34">queda sin métrica propia</text>
+<rect id="b15" class="bx" x="0" y="40" width="200" height="66" rx="3"/>
+<text class="tt" x="12" y="61" data-in="b15">posición</text>
+<text class="t" x="12" y="77" data-in="b15"><tspan class="mono">ID_Fund | PK2</tspan></text>
+<text class="t2" x="12" y="91" data-in="b15">atributos del maestro y hedge</text>
+<polyline class="fl" points="100,106 100,134" marker-end="url(#mn)"/>
+<rect class="lblbg" x="106.0" y="114" width="73.6" height="14"/>
+<text class="fl-l" x="110" y="124">se clasifica</text>
+<rect id="b16" class="bx" x="0" y="134" width="200" height="94" rx="3"/>
+<text class="tt" x="12" y="155" data-in="b16">clasificación</text>
+<text class="t" x="12" y="171" data-in="b16">BalSheetKey → Bucket</text>
+<text class="t2" x="12" y="185" data-in="b16">(<tspan class="mono">BD_BalanceSheet</tspan>)</text>
+<text class="t" x="12" y="199" data-in="b16">regla por fondo en</text>
+<text class="t" x="12" y="213" data-in="b16"><tspan class="mono">REGLAS/clasificacion</tspan> pisa</text>
+<rect id="b17" class="grp" x="240" y="40" width="530" height="356" rx="4"/>
+<rect class="lblbg" x="248" y="33" width="432.40000000000003" height="14"/>
+<text class="grp-l" x="253" y="44">TRATAMIENTO DEL BUCKET → ORDEN DE FUENTES · gana la primera válida</text>
+<polyline class="fl" points="200,181.0 240,181.0" marker-end="url(#mn)"/>
+<rect class="lblbg" x="193.0" y="159.0" width="54.0" height="14"/>
+<text class="fl-l" x="220" y="169.0" text-anchor="middle">define el</text>
+<rect id="b18" class="bx bx-ambar" x="250" y="70" width="104" height="28" rx="3"/>
+<text class="tt" x="302" y="88" text-anchor="middle" data-in="b18">DEF / PROPDEF</text>
+<text class="t" x="368" y="88" data-in="b17">atajo: <tspan class="mono">DEFAULTED</tspan> corporativo o <tspan class="mono">REGLAS/defaulteados</tspan></text>
+<text class="t2" x="368" y="102" data-in="b17">yield 0 · duration 0,5 · no consulta fuentes</text>
+<rect id="b19" class="bx" x="250" y="124" width="104" height="28" rx="3"/>
+<text class="tt" x="302" y="142" text-anchor="middle" data-in="b19">CASCADA</text>
+<rect id="b20" class="chip" x="368" y="126" width="81.1" height="24" rx="12"/>
+<text class="t" x="408.55" y="142.0" text-anchor="middle" data-in="b20">EXCEPCIONES</text>
+<text class="t" x="453.1" y="142">→</text>
+<rect id="b21" class="chip" x="465.1" y="126" width="32.3" height="24" rx="12"/>
+<text class="t" x="481.25" y="142.0" text-anchor="middle" data-in="b21">JPM</text>
+<text class="t" x="501.40000000000003" y="142">→</text>
+<rect id="b22" class="chip" x="513.4000000000001" y="126" width="26.2" height="24" rx="12"/>
+<text class="t" x="526.5000000000001" y="142.0" text-anchor="middle" data-in="b22">RA</text>
+<text class="t" x="543.6000000000001" y="142">→</text>
+<rect id="b23" class="chip bx-azul" x="555.6000000000001" y="126" width="93.3" height="24" rx="12"/>
+<text class="t" x="602.2500000000001" y="142.0" text-anchor="middle" data-in="b23">Bloomberg YAS</text>
+<text class="t" x="652.9000000000001" y="142">→</text>
+<rect id="b24" class="chip bx-azul" x="664.9000000000001" y="126" width="38.4" height="24" rx="12"/>
+<text class="t" x="684.1000000000001" y="142.0" text-anchor="middle" data-in="b24">CSHF</text>
+<text class="t" x="707.3000000000001" y="142">→</text>
+<rect id="b25" class="chip" x="719.3000000000001" y="126" width="44.5" height="24" rx="12"/>
+<text class="t" x="741.5500000000001" y="142.0" text-anchor="middle" data-in="b25">JSONL</text>
+<text class="t2" x="368" y="165" data-in="b17">CSHF = tabla de desarrollo de Bloomberg · JSONL = tabla propia desde Geneva</text>
+<rect id="b26" class="bx" x="250" y="178" width="104" height="28" rx="3"/>
+<text class="tt" x="302" y="196" text-anchor="middle" data-in="b26">CAJA</text>
+<rect id="b27" class="chip" x="368" y="180" width="81.1" height="24" rx="12"/>
+<text class="t" x="408.55" y="196.0" text-anchor="middle" data-in="b27">EXCEPCIONES</text>
+<text class="t" x="453.1" y="196">→</text>
+<rect id="b28" class="chip" x="465.1" y="180" width="26.2" height="24" rx="12"/>
+<text class="t" x="478.20000000000005" y="196.0" text-anchor="middle" data-in="b28">RA</text>
+<text class="t" x="495.3" y="196">→</text>
+<rect id="b29" class="chip" x="507.3" y="180" width="32.3" height="24" rx="12"/>
+<text class="t" x="523.45" y="196.0" text-anchor="middle" data-in="b29">JPM</text>
+<text class="t" x="543.6" y="196">→</text>
+<rect id="b30" class="chip" x="555.6" y="180" width="105.5" height="24" rx="12"/>
+<text class="t" x="608.35" y="196.0" text-anchor="middle" data-in="b30">índice + spread</text>
+<text class="t2" x="368" y="219" data-in="b17">índice de referencia y spread por posición en <tspan class="mono">REGLAS/cajas</tspan></text>
+<rect id="b31" class="bx" x="250" y="232" width="104" height="28" rx="3"/>
+<text class="tt" x="302" y="250" text-anchor="middle" data-in="b31">FACTURA</text>
+<rect id="b32" class="chip" x="368" y="234" width="81.1" height="24" rx="12"/>
+<text class="t" x="408.55" y="250.0" text-anchor="middle" data-in="b32">EXCEPCIONES</text>
+<text class="t" x="453.1" y="250">→</text>
+<rect id="b33" class="chip" x="465.1" y="234" width="87.2" height="24" rx="12"/>
+<text class="t" x="508.70000000000005" y="250.0" text-anchor="middle" data-in="b33">RPT de Facts</text>
+<text class="t2" x="368" y="273" data-in="b17">yield = tasa mensual × 12 · duration = días al vencimiento / 365</text>
+<rect id="b34" class="bx" x="250" y="286" width="104" height="28" rx="3"/>
+<text class="tt" x="302" y="304" text-anchor="middle" data-in="b34">CERO</text>
+<text class="t" x="368" y="304" data-in="b17">yield 0 · duration 0 (equity, payables, MTM)</text>
+<rect id="b35" class="bx" x="250" y="340" width="104" height="28" rx="3"/>
+<text class="tt" x="302" y="358" text-anchor="middle" data-in="b35">EXCLUIR</text>
+<text class="t" x="368" y="358" data-in="b17">fuera de métricas y agregados → estado EXCLUIDO</text>
+<line class="fl" x1="770" y1="84" x2="788" y2="84"/>
+<line class="fl" x1="770" y1="138" x2="788" y2="138"/>
+<line class="fl" x1="770" y1="192" x2="788" y2="192"/>
+<line class="fl" x1="770" y1="246" x2="788" y2="246"/>
+<line class="fl" x1="770" y1="300" x2="788" y2="300"/>
+<line class="fl" x1="788" y1="84" x2="788" y2="300"/>
+<rect id="b36" class="bx" x="820" y="98" width="280" height="80" rx="3"/>
+<text class="tt" x="832" y="119" data-in="b36">sanidad y elección</text>
+<text class="t" x="832" y="135" data-in="b36">yield entre −50 % y 100 %</text>
+<text class="t" x="832" y="149" data-in="b36">duration &gt; 0 · tupla completa</text>
+<text class="t2" x="832" y="163" data-in="b36">todo candidato queda en la hoja <tspan class="mono">candidatos</tspan></text>
+<polyline class="fl" points="788,138 820,138" marker-end="url(#mn)"/>
+<text class="fl-l" x="788" y="72" text-anchor="middle">gana la primera válida</text>
+<polyline class="fl" points="960.0,178 960.0,208" marker-end="url(#mn)"/>
+<rect class="lblbg" x="966.0" y="187" width="57.7" height="14"/>
+<text class="fl-l" x="970.0" y="197">convierte</text>
+<rect id="b37" class="bx" x="820" y="208" width="280" height="108" rx="3"/>
+<text class="tt" x="832" y="229" data-in="b37">conversión a la moneda del fondo</text>
+<text class="t" x="832" y="245" data-in="b37">indexado (UF, UDI, UVR, IPCA, UI, BONCER)</text>
+<text class="t" x="832" y="259" data-in="b37">→ breakeven; duration reexpresada</text>
+<text class="t" x="832" y="273" data-in="b37">USD hedgeado → <tspan class="b">XCCY de Bloomberg</tspan>;</text>
+<text class="t" x="832" y="287" data-in="b37">si no existe, drop propio con curvas</text>
+<text class="t2" x="832" y="301" data-in="b37">conserva <tspan class="mono">Yield_Papel</tspan> y <tspan class="mono">Duration_Papel</tspan></text>
+<polyline class="fl" points="960.0,316 960.0,346" marker-end="url(#mn)"/>
+<rect class="lblbg" x="966.0" y="325" width="57.7" height="14"/>
+<text class="fl-l" x="970.0" y="335">pisa todo</text>
+<rect id="b38" class="bx" x="820" y="346" width="280" height="52" rx="3"/>
+<text class="tt" x="832" y="367" data-in="b38">overrides de valor</text>
+<text class="t" x="832" y="383" data-in="b38"><tspan class="mono">REGLAS/overrides_valor</tspan>, con vigencia</text>
+<rect id="b39" class="grp" x="470" y="430" width="320" height="156" rx="4"/>
+<rect class="lblbg" x="478" y="423" width="86.80000000000001" height="14"/>
+<text class="grp-l" x="483" y="434">ESTADO FINAL</text>
+<rect id="b40" class="bx" x="482" y="446" width="296" height="52" rx="3"/>
+<text class="tt" x="494" y="467" data-in="b40">RESUELTO</text>
+<text class="t" x="494" y="483" data-in="b40">Yield · Duration · Fuente · Origen</text>
+<rect id="b41" class="bx bx-ambar" x="482" y="508" width="296" height="66" rx="3"/>
+<text class="tt" x="494" y="529" data-in="b41">FALTANTE</text>
+<text class="t" x="494" y="545" data-in="b41">entra al agregado a yield 0</text>
+<text class="t" x="494" y="559" data-in="b41">va a <tspan class="mono">plantilla_overrides</tspan> con motivo</text>
+<polyline class="fl" points="960.0,398 960.0,414 630.0,414 630.0,430" marker-end="url(#mn)"/>
+<rect class="lblbg" x="636.0" y="415" width="73.6" height="14"/>
+<text class="fl-l" x="640.0" y="425">estado final</text>
+<text class="grp-l" x="0" y="422">DESPUÉS, SOBRE TODA LA CARTERA</text>
+<rect id="b42" class="bx" x="0" y="430" width="440" height="80" rx="3"/>
+<text class="tt" x="12" y="451" data-in="b42">alertas</text>
+<text class="t" x="12" y="467" data-in="b42">reglas de <tspan class="mono">REGLAS/alertas</tspan> (A01–A09): umbral por fondo,</text>
+<text class="t" x="12" y="481" data-in="b42"><tspan class="mono">param:</tspan>, comparación con el cierre anterior</text>
+<text class="t2" x="12" y="495" data-in="b42">más las estructurales del pipeline (faltantes, sanidad, hedge…)</text>
+<rect id="b43" class="bx" x="0" y="524" width="440" height="94" rx="3"/>
+<text class="tt" x="12" y="545" data-in="b43">agregados</text>
+<text class="t" x="12" y="561" data-in="b43">AW = Σ y·MV / Σ MV     DW = Σ y·MV·D / Σ MV·D</text>
+<text class="t" x="12" y="575" data-in="b43">por fondo × ACTIVOS / PASIVOS / PATRIMONIO (A − P)</text>
+<text class="t" x="12" y="589" data-in="b43">abiertos por Bucket, Ficha_FI, FX_Exposure, país, moneda</text>
+<text class="t2" x="12" y="603" data-in="b43">verifica MV_PAT = MV_ACT − MV_PAS y pesos = 1</text>
+<polyline class="fl" points="470,470 440,470" marker-end="url(#mn)"/>
+<text class="fl-l" x="455" y="424" text-anchor="middle">alimenta</text>
+<polyline class="fl" points="470,532 455,532 455,554 440,554" marker-end="url(#mn)"/>
+</svg></div>
+</section>
+<section class="page">
+<h2>3. Ciclo del operador en cada cierre</h2>
+<p class="sub">Una sola corrida con terminal por cierre; todo lo demás se repite sobre la caché hasta cerrar, y el operador nunca edita código.</p>
+<div class="fig"><svg viewBox="0 0 1100 390" role="img" aria-label="Ciclo del operador en cada cierre" width="1100" height="390">
+<defs>
+<marker id="mn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+<marker id="mazul" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk mk-azul"/></marker>
+</defs>
+<rect class="bx bx-azul" x="0" y="36" width="18" height="12" rx="2"/><text class="t2" x="24" y="46">sale de la máquina / consume terminal Bloomberg</text><rect class="bx bx-ambar" x="0" y="54" width="18" height="12" rx="2"/><text class="t2" x="24" y="64">queda sin métrica propia</text>
+<rect id="b44" class="bx" x="0" y="120" width="168" height="94" rx="3"/>
+<text class="tt" x="12" y="141" data-in="b44">1  Insumos</text>
+<text class="t" x="12" y="157" data-in="b44"><tspan class="mono">MERCADO</tspan> y <tspan class="mono">MANUALES</tspan></text>
+<text class="t" x="12" y="171" data-in="b44">archivos del mes</text>
+<rect id="b45" class="bx" x="186" y="120" width="168" height="94" rx="3"/>
+<text class="tt" x="198" y="141" data-in="b45">2  <tspan class="mono">check</tspan></text>
+<text class="t" x="198" y="157" data-in="b45">valida insumos, <tspan class="mono">REGLAS</tspan>,</text>
+<text class="t" x="198" y="171" data-in="b45"><tspan class="mono">.env</tspan> y caché</text>
+<text class="t2" x="198" y="185" data-in="b45">exit 2 = no seguir</text>
+<rect id="b46" class="bx bx-azul" x="372" y="120" width="168" height="94" rx="3"/>
+<text class="tt" x="384" y="141" data-in="b46">3  <tspan class="mono">correr</tspan></text>
+<text class="t" x="384" y="157" data-in="b46">con terminal Bloomberg</text>
+<text class="t" x="384" y="171" data-in="b46">única corrida con terminal</text>
+<text class="t2" x="384" y="185" data-in="b46">llena <tspan class="mono">04_CACHE</tspan></text>
+<rect id="b47" class="bx" x="558" y="120" width="168" height="94" rx="3"/>
+<text class="tt" x="570" y="141" data-in="b47">4  Sin terminal</text>
+<text class="t" x="570" y="157" data-in="b47">respaldo del reporte,</text>
+<text class="t" x="570" y="171" data-in="b47"><tspan class="mono">correr --sin-bbg</tspan></text>
+<text class="t" x="570" y="185" data-in="b47"><tspan class="mono">--sin-sql</tspan> y <tspan class="mono">comparar</tspan></text>
+<text class="t2" x="570" y="199" data-in="b47">= 0 diferencias</text>
+<rect id="b48" class="bx" x="744" y="120" width="168" height="94" rx="3"/>
+<text class="tt" x="756" y="141" data-in="b48">5  Revisar Excel</text>
+<text class="t" x="756" y="157" data-in="b48"><tspan class="mono">alertas_resumen</tspan></text>
+<text class="t" x="756" y="171" data-in="b48"><tspan class="mono">plantilla_overrides</tspan></text>
+<text class="t" x="756" y="185" data-in="b48">agregados y conversiones</text>
+<rect id="b49" class="bx" x="930" y="120" width="168" height="94" rx="3"/>
+<text class="tt" x="942" y="141" data-in="b49">6  <tspan class="mono">REGLAS.xlsx</tspan></text>
+<text class="t" x="942" y="157" data-in="b49">overrides de valor y</text>
+<text class="t" x="942" y="171" data-in="b49">de atributo, con vigencia</text>
+<polyline class="fl" points="168,158 186,158" marker-end="url(#mn)"/>
+<polyline class="fl" points="354,158 372,158" marker-end="url(#mn)"/>
+<polyline class="fl" points="540,158 558,158" marker-end="url(#mn)"/>
+<polyline class="fl" points="726,158 744,158" marker-end="url(#mn)"/>
+<polyline class="fl" points="912,158 930,158" marker-end="url(#mn)"/>
+<rect id="b50" class="bx bx-azul" x="440" y="30" width="220" height="52" rx="3"/>
+<text class="tt" x="452" y="51" data-in="b50"><tspan class="mono">04_CACHE/{F}</tspan></text>
+<text class="t" x="452" y="67" data-in="b50">respuestas de Bloomberg y FX del cierre</text>
+<polyline class="fl fl-azul" points="452,120 452,82" marker-end="url(#mazul)"/>
+<rect class="lblbg" x="460.0" y="92" width="36.5" height="14"/>
+<text class="fl-l fl-l-azul" x="464" y="102">llena</text>
+<polyline class="fl" points="638,82 638,120" marker-end="url(#mn)"/>
+<rect class="lblbg" x="646.0" y="92" width="25.9" height="14"/>
+<text class="fl-l" x="650" y="102">lee</text>
+<polyline class="fl fl-dash" points="990,214 990,252 638,252 638,214" marker-end="url(#mn)"/>
+<text class="fl-l" x="814.0" y="266" text-anchor="middle">vuelve a correr sin terminal hasta cerrar</text>
+<polyline class="fl fl-dash" points="1050,214 1050,298 60,298 60,214" marker-end="url(#mn)"/>
+<text class="fl-l" x="560" y="312" text-anchor="middle">el reporte final es el cierre anterior del mes siguiente</text>
+<rect id="b51" class="bx" x="0" y="338" width="1100" height="36" rx="3"/>
+<text class="t" x="12" y="359" data-in="b51">El operador nunca edita código: todo lo que cambia entre cierres va en <tspan class="mono">REGLAS.xlsx</tspan> (overrides con vigencia) y queda trazado en la hoja <tspan class="mono">reglas_aplicadas</tspan>.</text>
+</svg></div>
+</section>
+<section class="page">
+<h2>4. Dónde vive cada decisión</h2>
+<p class="sub">Cinco lugares, cada uno con un dueño distinto. El operador solo edita los dos primeros.</p>
+<table>
+<thead><tr><th>Lugar</th><th>Qué decide</th></tr></thead>
+<tbody>
+<tr><td>.env</td><td>Rutas a CUBO, BIX y raíz de trabajo; credenciales de beemining. Nunca se sube al repositorio.</td></tr>
+<tr><td>REGLAS.xlsx</td><td>Política de hedge por fondo, tratamiento por bucket, reclasificaciones por fondo, cajas (índice y spread), defaulteados, overrides de atributo y de valor con vigencia, reglas de alerta y parámetros (umbrales, política XCCY).</td></tr>
+<tr><td>config.py</td><td>Mapas técnicos estables: campo YAS por Yield_Type, índices y sus curvas, curvas de drops por moneda, alias de índices, sufijos de familia REGS/144A.</td></tr>
+<tr><td>BD_* corporativos</td><td>Maestro de instrumentos, taxonomía de buckets, fondos, monedas, defaulted y homologaciones. Se mantienen fuera de este proyecto y se leen tal cual.</td></tr>
+<tr><td>04_CACHE</td><td>Todo lo que respondió Bloomberg y beemining para ese cierre. Se puede borrar y regenerar con terminal; con la caché completa, una corrida sin terminal da el mismo reporte.</td></tr>
+</tbody>
+</table>
+</section>
+</main>
