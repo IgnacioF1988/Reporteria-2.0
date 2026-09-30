@@ -140,7 +140,7 @@ def importar_cache_legacy_cmd(fecha: str = typer.Option(..., help="Cierre YYYYMM
 def migrar_manuales_cmd(fecha: str = typer.Option(..., help="Cierre YYYYMMDD (para ubicar la raíz)"),
                         legacy: Path = typer.Option(..., help="Carpeta del repo legacy (o con FIP/DEFAULTEADOS/OVERRIDES/Atributos_*)"),
                         aplicar: bool = typer.Option(False, "--aplicar", help="Fusionar en REGLAS.xlsx (deja REGLAS_backup_*.xlsx)"),
-                        incluir_defaulteados: bool = typer.Option(False, "--incluir-defaulteados", help="Traer DEFAULTEADOS.xlsx del legacy"),
+                        incluir_defaulteados: bool = typer.Option(False, "--incluir-defaulteados", help="Traer DEFAULTEADOS.xlsx del legacy como filas globales por instrumento (recomendado)"),
                         template_cajas: Path | None = typer.Option(None, help="Template_Cajas.xlsx para la hoja cajas"),
                         raiz: Path | None = None):
     """Convierte FIP, Atributos_*, OVERRIDES (y opcionalmente DEFAULTEADOS) del legacy a filas de REGLAS.xlsx con ID_Fund."""

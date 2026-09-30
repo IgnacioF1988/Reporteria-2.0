@@ -266,7 +266,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     cand = pd.concat([cand, c], ignore_index=True) if len(c) else cand
     tds = pd.concat([tds, t], ignore_index=True) if len(t) else tds
 
-    pos, cand, a = cascada.elegir(pos, cand, defaulted, reglas.defaulteados, rutas.settle, yt_default)
+    pos, cand, a = cascada.elegir(pos, cand, defaulted, reglas.defaulteados, rutas.settle, yt_default, reglas.parametros)
     al.append(a)
 
     # ── H4: índice, conversión a moneda del fondo (breakeven / XCCY / drop) y overrides de valor ──

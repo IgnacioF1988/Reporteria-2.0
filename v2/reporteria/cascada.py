@@ -65,8 +65,10 @@ def _defaults(pos: pd.DataFrame, defaulted: pd.DataFrame | None, reglas_def: pd.
 
 
 def elegir(pos: pd.DataFrame, cand: pd.DataFrame, defaulted: pd.DataFrame | None, reglas_def: pd.DataFrame,
-           settle: pd.Timestamp, yield_type_default: int = 15) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+           settle: pd.Timestamp, yield_type_default: int = 15, parametros: dict | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pos = pos.copy()
+    par = parametros or {}
+    y_def, d_def = float(par.get("yield_def", YIELD_DEF)), float(par.get("duracion_def", DURATION_DEF))
     trat = pos.set_index("Pos_ID")["Tratamiento"]
     cero = pos[pos["Tratamiento"].eq("CERO")]
     if len(cero):        # entran al agregado con yield 0 y duration 0; deben quedar trazados como candidato
@@ -88,11 +90,11 @@ def elegir(pos: pd.DataFrame, cand: pd.DataFrame, defaulted: pd.DataFrame | None
 
     pos["Estado_DEF"] = _defaults(pos, defaulted, reglas_def, settle)
     es_def = pos["Estado_DEF"].ne("") & pos["Tratamiento"].ne("EXCLUIR")
-    pos.loc[es_def, ["Yield", "Duration"]] = [YIELD_DEF, DURATION_DEF]
+    pos.loc[es_def, ["Yield", "Duration"]] = [y_def, d_def]
     pos.loc[es_def, ["Fuente", "Etapa", "Origen"]] = ["REGLA_DEF", "REGLA_DEF", "DEFAULTED/REGLAS"]
     pos.loc[es_def, "CalcType"] = pos.loc[es_def, "Estado_DEF"].map(CALC_TYPE_DEF)
     if es_def.any():
-        cand = pd.concat([cand, pd.DataFrame([candidato(p, "REGLA_DEF", YIELD_DEF, DURATION_DEF, origen="DEFAULTED/REGLAS",
+        cand = pd.concat([cand, pd.DataFrame([candidato(p, "REGLA_DEF", y_def, d_def, origen="DEFAULTED/REGLAS",
                                                         detalle=p["Estado_DEF"]) for _, p in pos[es_def].iterrows()])], ignore_index=True)
 
     resuelto = pos["Yield"].notna() & pos["Duration"].notna()

@@ -19,3 +19,19 @@ def test_sanidad_descarta_duration_no_positiva_y_yield_fuera_de_rango():
     assert c.loc["3-1", "Motivo_Descarte"] == "YIELD_FUERA_RANGO"
     assert c.loc["4-1", "Valido"] and c.loc["5-1", "Valido"]                       # CAJA no pasa por sanidad
     assert (al["Nombre"] == "PROVEEDOR_INVALIDO").sum() == 2
+
+
+def test_def_pisa_al_proveedor_y_usa_parametros():
+    from reporteria.cascada import elegir
+    pos = pd.DataFrame([dict(Pos_ID="20|441-1|Asset", PK2="441-1", ID_Fund=20, ID_Instrumento=441, Tratamiento="CASCADA", TotalMVal=100.0, Yield_Type=15),
+                        dict(Pos_ID="16|441-1|Asset", PK2="441-1", ID_Fund=16, ID_Instrumento=441, Tratamiento="CASCADA", TotalMVal=100.0, Yield_Type=15),
+                        dict(Pos_ID="20|7-1|Asset", PK2="7-1", ID_Fund=20, ID_Instrumento=7, Tratamiento="CASCADA", TotalMVal=100.0, Yield_Type=15)])
+    cand = pd.DataFrame([candidato(pos.iloc[0], "CSHF", 0.29, 2.4), candidato(pos.iloc[2], "JPM", 0.06, 3.0)])
+    reglas_def = pd.DataFrame([dict(ID_Fund=None, ID_Instrumento=441, Estado="DEF", Fecha_Desde=pd.NaT, Fecha_Fin=pd.NaT)])
+    out, c, _ = elegir(pos, cand, None, reglas_def, pd.Timestamp("2026-07-31"))
+    o = out.set_index("Pos_ID")
+    assert o.loc["20|441-1|Asset", "Fuente"] == "REGLA_DEF" and o.loc["20|441-1|Asset", "Yield"] == 0 and o.loc["20|441-1|Asset", "Duration"] == 0.5
+    assert o.loc["16|441-1|Asset", "Estado"] == "RESUELTO" and o.loc["16|441-1|Asset", "Fuente"] == "REGLA_DEF"   # global: también sin candidato
+    assert o.loc["20|7-1|Asset", "Fuente"] == "JPM"
+    out, _, _ = elegir(pos, cand, None, reglas_def, pd.Timestamp("2026-07-31"), parametros={"duracion_def": 0, "yield_def": 0})
+    assert out.set_index("Pos_ID").loc["16|441-1|Asset", "Duration"] == 0

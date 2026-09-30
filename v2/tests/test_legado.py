@@ -39,7 +39,10 @@ def test_migrar_manuales_fip_atributos_y_defaulteados(fixtures, tmp_path):
     assert "no está en BD_INSTRUMENTOS" in informe.set_index("Archivo").loc["Atributos_MLDL.xlsx", "Avisos"]
     nuevas2, informe2 = migrar_manuales(corp / "legacy_manuales", alias, None, incluir_defaulteados=True)
     d = nuevas2["defaulteados"]
-    assert len(d) == 176 and set(d["Estado"]) == {"DEF", "PROPDEF"} and 2 in set(d[d["ID_Instrumento"] == 441]["ID_Fund"])
+    # 176 filas por fondo → 89 instrumentos globales (el legacy aplicaba DEF/PROPDEF por PK2 en todos los fondos)
+    assert len(d) == 89 and set(d["Estado"]) == {"DEF", "PROPDEF"} and d["ID_Fund"].isna().all() and d["ID_Instrumento"].is_unique
+    adasa = d[d["ID_Instrumento"] == 441].iloc[0]
+    assert adasa["Estado"] == "DEF" and "ALTURAS II" in adasa["Comentario"] and "MDLAT" in adasa["Comentario"]
     # fusionar: no duplica al aplicar dos veces y el resultado es un REGLAS válido
     salida = tmp_path / "REGLAS.xlsx"
     n1 = fusionar_reglas(fixtures / "REGLAS.xlsx", nuevas, salida)

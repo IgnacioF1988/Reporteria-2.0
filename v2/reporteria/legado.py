@@ -227,22 +227,29 @@ def migrar_manuales(legacy: Path, alias: dict[str, int], ids_instrumento: set[in
     if deff:
         d = pd.read_excel(deff); avisos, n = [], 0
         if incluir_defaulteados:
+            # El legacy aplicaba DEF/PROPDEF por PK2 en TODOS los fondos (ignoraba la columna Fondo): una fila global por instrumento
+            por_iid: dict[int, dict] = {}
             for _, r in d.iterrows():
-                fid = fondo(r["Fondo"])
-                if fid is None:
-                    avisos.append(f"fondo desconocido {r['Fondo']}"); continue
                 iid, _ = _split_pk2(r["PK2"])
                 if iid is None:
                     avisos.append(f"PK2 inválido {r['PK2']}"); continue
                 est = str(r.get("DEF", "")).strip().upper()
                 if est not in ("DEF", "PROPDEF"):
                     avisos.append(f"estado {est} inválido para {r['PK2']}"); continue
+                if fondo(r["Fondo"]) is None:
+                    avisos.append(f"fondo desconocido {r['Fondo']} (informativo: la marca es global)")
+                e = por_iid.setdefault(iid, dict(estados=set(), fondos=[], nombre=str(r.get("Instrumento", "") or "")))
+                e["estados"].add(est); e["fondos"].append(str(r["Fondo"]).strip())
+            for iid, e in por_iid.items():
+                est = "DEF" if "DEF" in e["estados"] else "PROPDEF"
+                if len(e["estados"]) > 1:
+                    avisos.append(f"{iid} marcado DEF y PROPDEF en fondos distintos: se usa DEF")
                 sin_maestro(iid, avisos)
-                nuevas["defaulteados"].append(dict(ID_Fund=fid, ID_Instrumento=iid, Estado=est, Fecha_Desde=None, Fecha_Fin=None,
-                                                   Comentario=f"migrado de DEFAULTEADOS.xlsx: {r.get('Instrumento', '')}"))
+                nuevas["defaulteados"].append(dict(ID_Fund=None, ID_Instrumento=iid, Estado=est, Fecha_Desde=None, Fecha_Fin=None,
+                                                   Comentario=f"migrado de DEFAULTEADOS.xlsx: {e['nombre']} (fondos: {', '.join(sorted(set(e['fondos'])))})"))
                 n += 1
         else:
-            avisos.append("omitido: el corporativo DEFAULTED.xlsx es la fuente; use --incluir-defaulteados para traerlo")
+            avisos.append("omitido: use --incluir-defaulteados para traerlo (el DEFAULTED.xlsx corporativo está desactualizado)")
         avisar("DEFAULTEADOS.xlsx", len(d), n, avisos)
     ov = _buscar_manual(legacy, "OVERRIDES.xlsx")
     if ov:
