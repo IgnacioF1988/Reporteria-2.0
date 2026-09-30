@@ -5,6 +5,9 @@ todo el patrimonio de los fondos (renta fija, caja, fondos mutuos, pactos, factu
 y entrega agregados por fondo a nivel activos, pasivos y patrimonio. Reescritura desde cero del pipeline legacy
 (`../00_CODIGO`, solo referencia). Plan y decisiones: `PLAN.md`. Pendientes: `FUTURO.md`.
 
+Diagramas de arquitectura, flujo por posición y ciclo del operador: [`docs/Reporteria_2.0_Arquitectura.pdf`](docs/Reporteria_2.0_Arquitectura.pdf)
+(se regeneran con `docs/build_diagramas.py`).
+
 ## Principios
 - **Un solo archivo de parametrización** para el operador: `01_INPUTS/MANUALES/REGLAS.xlsx`.
 - **`ID_Fund` numérico** en todo manual; vacío = todos los fondos.
