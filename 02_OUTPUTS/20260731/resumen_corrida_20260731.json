@@ -54,15 +54,15 @@
     76
   ],
   "estado": {
-    "RESUELTO": 6886,
-    "FALTANTE": 311
+    "RESUELTO": 6887,
+    "FALTANTE": 310
   },
   "fuente": {
     "FACTURA": 3390,
     "CERO": 1636,
     "JPM": 600,
     "BBG": 402,
-    "RA": 261,
+    "RA": 262,
     "CAJA": 244,
     "REGLA_DEF": 205,
     "EXCEPCIONES": 92,
@@ -100,7 +100,7 @@
     "16": 0.9961,
     "17": 0.9874,
     "19": 1.0,
-    "20": 0.8729,
+    "20": 0.8738,
     "23": 0.0621,
     "25": 1.0,
     "26": 1.0,
@@ -179,8 +179,8 @@
       null
     ],
     "20": [
-      0.069088,
-      0.093076
+      0.069152,
+      0.093074
     ],
     "23": [
       0.0,
@@ -343,7 +343,7 @@
     "ALTA|CAJA_SIN_REGLA": 176,
     "ALTA|COBERTURA_BAJA": 8,
     "ALTA|DEFAULT_CON_AI": 8,
-    "ALTA|FALTANTE": 311,
+    "ALTA|FALTANTE": 310,
     "ALTA|MONEDA_SIN_CURVAS_DROP": 1,
     "ALTA|SIN_BREAKEVEN": 1,
     "ALTA|SIN_CONVERSION_HEDGE": 6,
@@ -352,12 +352,12 @@
     "INFO|CURVA_EXTRAPOLADA": 104,
     "INFO|FACTURA_ASOF_REVERTIDA": 12,
     "INFO|FACTURA_MOROSA": 233,
-    "INFO|FACTURA_SIN_POSICION": 1,
+    "INFO|FACTURA_SIN_POSICION": 43,
     "INFO|FACTURA_TASA_PRORROGA": 5,
     "INFO|FAMILIA_INFERIDA": 74,
     "INFO|FLOTANTE_PROVEEDOR": 5,
     "INFO|INDICE_SIN_CURVA": 2,
-    "INFO|RA_TIR_MENSUAL": 7,
+    "INFO|RA_TIR_MENSUAL": 8,
     "MEDIA|BONO_SIN_AI": 124,
     "MEDIA|CAJA_SIN_VALOR": 42,
     "MEDIA|ESCALA_FALLBACK": 23,
@@ -376,5 +376,5 @@
     "HEDGE_CONVERTIDO",
     "SIN_TRATAMIENTO"
   ],
-  "segundos": 68.9
+  "segundos": 117.2
 }
