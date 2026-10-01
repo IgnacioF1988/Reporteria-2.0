@@ -73,3 +73,16 @@ def test_cruce_por_numero_de_operacion_morosa_y_monto_contra_qty():
     assert (al["Nombre"] == "FACTURA_MOROSA").sum() == 1 and not (al["Nombre"] == "FACTURA_MONTO_DISTINTO").any()   # monto vs Qty, no vs MV
     cand, _ = candidatos_facturas(pos, rpt, {}, FONDOS, SETTLE, parametros={"factura_morosa_duration": 0.25})
     assert cand.set_index("PK2").loc["501-39", "Duration"] == 0.25
+
+
+def test_no_vivas_explican_el_faltante_y_sobrantes_por_fila():
+    pos = pd.DataFrame([{**_pos("600-39", 600), "Name_Instrumento": "FACPP600"}, {**_pos("601-39", 601), "Name_Instrumento": "FACPP601"}])
+    rpt = pd.DataFrame([_rpt(documento_operacion_id=600, nemotecnico="FACPP600", estado="pagado", fecha_pago=SETTLE - pd.Timedelta(days=2), tasa_origen="ORIGINAL", cambios_revertidos=0, viva=False),
+                        _rpt(documento_operacion_id=601, nemotecnico="FACPP601", fecha_inversion=SETTLE + pd.Timedelta(days=1), tasa_origen="ORIGINAL", cambios_revertidos=0, viva=False),
+                        _rpt(documento_operacion_id=602, nemotecnico="FACPP602", fecha_inversion=SETTLE - pd.Timedelta(days=5), tasa_origen="ORIGINAL", cambios_revertidos=0, viva=True)])
+    cand, al = candidatos_facturas(pos, rpt, {}, FONDOS, SETTLE, parametros={})
+    c = cand.set_index("PK2")
+    assert c.loc["600-39", "Motivo_Descarte"] == f"FACTURA_PAGADA_{SETTLE - pd.Timedelta(days=2):%Y%m%d}" and "pagado" in c.loc["600-39", "Detalle"]
+    assert c.loc["601-39", "Motivo_Descarte"] == "FACTURA_COMPRADA_DESPUES_DEL_CIERRE"
+    s = al[al["Nombre"] == "FACTURA_SIN_POSICION"]
+    assert len(s) == 1 and s["PK2"].iloc[0] == "FACPP602" and s["Valor"].iloc[0] == 1000.0 and "fondo=MRCLP" in s["Detalle"].iloc[0]

@@ -8,7 +8,7 @@ from . import alertas
 from .modelo import CALC_TYPE_DEF, DURATION_DEF, YIELD_DEF, candidato, vigente
 
 # EXCEPCIONES es decisión explícita del PM: va primero en todo tratamiento salvo EXCLUIR
-ORDEN = {"CASCADA": ["EXCEPCIONES", "JPM", "RA", "BBG", "CSHF", "JSONL"], "FACTURA": ["EXCEPCIONES", "FACTURA"],
+ORDEN = {"CASCADA": ["EXCEPCIONES", "JPM", "RA", "BBG", "CSHF", "JSONL"], "FACTURA": ["EXCEPCIONES", "FACTURA", "RA"],
          "CAJA": ["EXCEPCIONES", "RA", "JPM", "CAJA"], "CERO": ["EXCEPCIONES", "CERO"], "EXCLUIR": ["EXCLUIR"]}
 PROVEEDORES = {"JPM", "RA", "BBG", "CSHF", "JSONL", "EXCEPCIONES"}
 CALC_TYPE_FUENTE = {"FACTURA": "PROP", "CAJA": "PROP", "EXCEPCIONES": "PROP", "CSHF": "PROP", "JSONL": "PROP", "RA": "1", "CERO": "", "EXCLUIR": ""}

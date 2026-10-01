@@ -41,8 +41,14 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
     if sin_fondo.any():
         al.append(alertas.emitir("FACTURA_FONDO_DESCONOCIDO", "MEDIA", detalle=f"fondos del RPT sin match en HOMOL_FUNDS: {sorted(set(r.loc[sin_fondo, 'fondo']))}", ambito="CORRIDA"))
     pagada = pd.to_datetime(r["fecha_pago"], errors="coerce")
-    vivas = r[(pagada.isna() | (pagada > settle)) & r["ID_Fund"].notna()].copy()
-    vivas["ID_Fund"] = vivas["ID_Fund"].astype(int)
+    comprada = pd.to_datetime(r["fecha_inversion"], errors="coerce") if "fecha_inversion" in r.columns else pd.Series(pd.NaT, index=r.index)
+    es_viva = (pagada.isna() | (pagada > settle)) & (comprada.isna() | (comprada <= settle))
+    con_fondo = r[r["ID_Fund"].notna()].copy()
+    con_fondo["ID_Fund"] = con_fondo["ID_Fund"].astype(int)
+    vivas = con_fondo[es_viva[con_fondo.index]].copy()
+    no_vivas = con_fondo[~es_viva[con_fondo.index]]
+    doc_nv = pd.to_numeric(no_vivas.get("documento_operacion_id"), errors="coerce") if "documento_operacion_id" in no_vivas.columns else pd.Series(float("nan"), index=no_vivas.index)
+    por_doc_nv = {(int(f), int(d)): i for i, f, d in zip(no_vivas.index, no_vivas["ID_Fund"], doc_nv) if pd.notna(d)}
     facts = "tasa_origen" in vivas.columns          # solo el lector as-of de Facts la produce (el Excel del RPT también trae documento_operacion_id)
     doc = pd.to_numeric(vivas.get("documento_operacion_id"), errors="coerce") if "documento_operacion_id" in vivas.columns else pd.Series(float("nan"), index=vivas.index)
     por_doc = {(int(f), int(d)): i for i, f, d in zip(vivas.index, vivas["ID_Fund"], doc) if pd.notna(d)}
@@ -57,7 +63,14 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
         if i is None and pd.notna(p.get("ID_Instrumento")):
             i = por_iid.get((fid, int(p["ID_Instrumento"])))
         if i is None:
-            filas.append(candidato(p, "FACTURA", valido=False, motivo="SIN_FACTURA"))
+            j = por_doc_nv.get((fid, n)) if n is not None else None
+            if j is None:
+                filas.append(candidato(p, "FACTURA", valido=False, motivo="SIN_FACTURA"))
+            else:                                   # existe en Facts pero no estaba viva al cierre: se explica
+                nv = no_vivas.loc[j]
+                pag = pd.to_datetime(nv.get("fecha_pago"), errors="coerce")
+                motivo = f"FACTURA_PAGADA_{pag:%Y%m%d}" if pd.notna(pag) and pag <= settle else "FACTURA_COMPRADA_DESPUES_DEL_CIERRE"
+                filas.append(candidato(p, "FACTURA", valido=False, motivo=motivo, detalle=f"Facts estado={nv.get('estado', '')} fecha_pago={pag:%Y-%m-%d}" if pd.notna(pag) else f"Facts estado={nv.get('estado', '')}"))
             continue
         f = vivas.loc[i]
         usadas.add(i)
@@ -88,7 +101,10 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
         al.append(alertas.emitir("FACTURA_ASOF_REVERTIDA", "INFO", pd.DataFrame(rev), "cambios de Facts posteriores al cierre revertidos (as-of)", valor="Valor"))
     if dif:
         al.append(alertas.emitir("FACTURA_MONTO_DISTINTO", "MEDIA", pd.DataFrame(dif), "monto_compra de Facts/RPT difiere de la cantidad (nominal) del CUBO", valor="Valor"))
-    sobrantes = vivas.loc[[i for i in vivas.index if i not in usadas], "nemotecnico"].tolist()
-    if sobrantes:
-        al.append(alertas.emitir("FACTURA_SIN_POSICION", "INFO", detalle=f"{len(sobrantes)} facturas vivas de Facts/RPT sin posición en el CUBO (ej. {sobrantes[:3]})", ambito="CORRIDA"))
+    sobr = vivas.loc[[i for i in vivas.index if i not in usadas]]
+    if len(sobr):
+        filas_sobr = pd.DataFrame({"Pos_ID": "", "ID_Fund": sobr["ID_Fund"].values, "PK2": sobr["nemotecnico"].values, "Name_Instrumento": sobr["nemotecnico"].values,
+                                   "Valor": pd.to_numeric(sobr["monto_compra"], errors="coerce").values,
+                                   "Detalle": [f"fondo={a} estado={b} vence={pd.to_datetime(c, errors='coerce'):%Y-%m-%d}" for a, b, c in zip(sobr["fondo"], sobr["estado"], sobr["fecha_vencimiento"])]})
+        al.append(alertas.emitir("FACTURA_SIN_POSICION", "INFO", filas_sobr, "Detalle", valor="Valor"))
     return pd.DataFrame(filas), alertas.juntar(*al)

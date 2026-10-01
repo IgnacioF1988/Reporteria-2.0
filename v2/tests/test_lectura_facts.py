@@ -67,3 +67,10 @@ def test_columnas_faltantes_y_tasa_en_porcentaje():
                            fecha_vencimiento="2026-09-30", fecha_pago=None, tasa_mensual=0.8)])
     with pytest.raises(ValueError, match="decimal"):
         normalizar_tablas({"facturas": f})
+
+
+def test_incluir_no_vivas_marca_pagadas_y_posteriores(tablas):
+    todas = facturas_al_cierre(tablas, pd.Timestamp("2026-07-31"), incluir_no_vivas=True)
+    assert len(todas) == 187 and todas["viva"].dtype == bool
+    assert not _doc(todas, 58964)["viva"] and _doc(todas, 59396)["viva"]          # pagada 17-07 vs pagada 18-08
+    assert set(facturas_al_cierre(tablas, pd.Timestamp("2026-07-31"))["documento_operacion_id"]) == set(todas.loc[todas["viva"], "documento_operacion_id"])

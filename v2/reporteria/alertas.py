@@ -32,7 +32,7 @@ def emitir(nombre: str, severidad: str, filas: pd.DataFrame | None = None, detal
         "Pos_ID": filas.get("Pos_ID", ""), "ID_Fund": filas.get("ID_Fund"), "PK2": filas.get("PK2", ""),
         "Name_Instrumento": filas.get("Name_Instrumento", ""),
         "Valor": filas[valor] if isinstance(valor, str) and valor in filas.columns else valor,
-        "Detalle": detalle,
+        "Detalle": filas[detalle] if isinstance(detalle, str) and detalle in filas.columns else detalle,   # columna → detalle por fila
     })
     return out[COLS_ALERTA]
 

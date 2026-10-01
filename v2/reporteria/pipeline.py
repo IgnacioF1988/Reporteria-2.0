@@ -82,14 +82,15 @@ def _facturas(opciones: Opciones, rutas: Rutas, log, al) -> pd.DataFrame | None:
     if tablas:
         try:
             t = normalizar_tablas(tablas)
-            rpt = facturas_al_cierre(t, rutas.settle)
+            rpt = facturas_al_cierre(t, rutas.settle, incluir_no_vivas=True)
         except ValueError as e:                # columnas o unidades inesperadas en la base: se avisa y se sigue con Excel
             log.warning("Facts con tablas inválidas (%s): se usa FACTURAS_%s.xlsx si existe", e, rutas.fecha)
             al.append(alertas.emitir("FACTS_INVALIDO", "ALTA", detalle=str(e), ambito="CORRIDA"))
             return _opcional("FACTURAS", rutas.facturas, leer_facturas, log, al)
+        viva = rpt[rpt["viva"]]
         log.info("FACTS: %d facturas, %d prórrogas, %d cambios; vivas al cierre %s: %d (tasa de prórroga: %d, cambios revertidos: %d)",
-                 len(t["facturas"]), len(t["prorrogas"]), len(t["cambios"]), rutas.fecha, len(rpt),
-                 int(rpt["tasa_origen"].eq("PRORROGA").sum()), int((rpt["cambios_revertidos"] > 0).sum()))
+                 len(t["facturas"]), len(t["prorrogas"]), len(t["cambios"]), rutas.fecha, len(viva),
+                 int(viva["tasa_origen"].eq("PRORROGA").sum()), int((viva["cambios_revertidos"] > 0).sum()))
         return rpt
     return _opcional("FACTURAS", rutas.facturas, leer_facturas, log, al)
 

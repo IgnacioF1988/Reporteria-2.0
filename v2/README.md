@@ -40,7 +40,7 @@ Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input oblig
 |---|---|---|
 | `CASCADA` (renta fija) | EXCEPCIONES → JPM → RA → **BBG YAS** → **CSHF** (TD de Bloomberg) → **JSONL** (TD propia desde Geneva) | BBG y CSHF solo para lo que sigue pendiente y no es DEF |
 | `CAJA` | EXCEPCIONES → RA → JPM → regla `cajas` (índice + spread) | nada |
-| `FACTURA` | EXCEPCIONES → base de Facts (caché → túnel SSH) → RPT en Excel | nada |
+| `FACTURA` | EXCEPCIONES → base de Facts (caché → túnel SSH) → RPT en Excel → RA (respaldo, p. ej. FNCHI) | nada |
 | `CERO` / `EXCLUIR` | yield 0 / fuera de métricas | nada |
 
 ### Conversión a la moneda del fondo (H4)
@@ -135,7 +135,10 @@ solo la caché. Si no hay caché ni conexión se lee el RPT en Excel (`FACTURAS_
 `documento_operacion_id` de Facts y manda (Geneva antepone `RC` en MRCLP, así que el nemotécnico de Facts no está en HOMOL);
 respaldo `nemotecnico → HOMOL_INSTRUMENTOS (GENEVA) → ID_Instrumento`; `fondo → HOMOL_FUNDS / BD_FUNDS → ID_Fund`.
 Yield = `tasa_mensual × 12` (decimal, base 30 días), Duration = días al vencimiento vigente / 365. Morosa (vencida y no
-pagada al cierre): tasa × 12 y duration `factura_morosa_duration` (0), alerta INFO `FACTURA_MOROSA`.
+pagada al cierre): tasa × 12 y duration `factura_morosa_duration` (0), alerta INFO `FACTURA_MOROSA`. Una posición del CUBO que
+Facts tiene pagada antes del cierre o comprada después queda FALTANTE con motivo `FACTURA_PAGADA_{fecha}` /
+`FACTURA_COMPRADA_DESPUES_DEL_CIERRE`; las facturas vivas en Facts sin posición en el CUBO salen una a una en
+`FACTURA_SIN_POSICION` (INFO, con fondo, estado y vencimiento).
 
 Estado **al cierre** (`lectura/facts.facturas_al_cierre`): la base está viva, así que se revierten con `bi_cambios` los cambios
 de tasa, vencimiento y monto posteriores al cierre (`FACTURA_ASOF_REVERTIDA`, INFO); una factura pagada después del cierre

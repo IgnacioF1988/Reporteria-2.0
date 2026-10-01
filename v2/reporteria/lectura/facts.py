@@ -17,8 +17,8 @@ FECHAS = {"facturas": ("fecha_inversion", "fecha_vencimiento_original", "fecha_v
           "prorrogas": ("fecha_inicio", "fecha_vencimiento_nueva", "fecha_registro"), "cambios": ("fecha",)}
 NUMEROS = {"facturas": ("monto_compra", "tasa_mensual", "tasa_mensual_prorroga", "prorrogas"), "prorrogas": ("tasa_mensual",), "cambios": ()}
 CAMPOS_ASOF = {"tasa_interes": "tasa_mensual", "fecha_vencimiento": "fecha_vencimiento", "monto_compra": "monto_compra"}
-SALIDA = ["documento_operacion_id", "nemotecnico", "fondo", "estado", "monto_compra", "fecha_vencimiento", "fecha_pago", "tasa_mensual",
-          "tasa_origen", "vencimiento_origen", "cambios_revertidos"]
+SALIDA = ["documento_operacion_id", "nemotecnico", "fondo", "estado", "monto_compra", "fecha_vencimiento", "fecha_pago", "fecha_inversion",
+          "tasa_mensual", "tasa_origen", "vencimiento_origen", "cambios_revertidos", "viva"]
 
 
 def normalizar_tablas(t: dict) -> dict[str, pd.DataFrame]:
@@ -48,14 +48,21 @@ def normalizar_tablas(t: dict) -> dict[str, pd.DataFrame]:
     return out
 
 
-def facturas_al_cierre(t: dict[str, pd.DataFrame], settle: pd.Timestamp) -> pd.DataFrame:
-    """Una fila por factura viva al cierre con tasa, vencimiento y monto vigentes a esa fecha (ver docstring del módulo)."""
+def facturas_al_cierre(t: dict[str, pd.DataFrame], settle: pd.Timestamp, incluir_no_vivas: bool = False) -> pd.DataFrame:
+    """Una fila por factura viva al cierre con tasa, vencimiento y monto vigentes a esa fecha (ver docstring del módulo).
+
+    Con `incluir_no_vivas` devuelve también las pagadas antes del cierre y las compradas después, con `viva=False`, para
+    explicar en el reporte por qué una posición del CUBO no cruza.
+    """
     f = t["facturas"].copy()
     f["tasa_origen"], f["vencimiento_origen"], f["cambios_revertidos"] = "ORIGINAL", "ORIGINAL", 0
     f = f[f["documento_operacion_id"].notna()]
-    if "fecha_inversion" in f.columns:
-        f = f[f["fecha_inversion"].isna() | (f["fecha_inversion"] <= settle)]
-    f = f[f["fecha_pago"].isna() | (f["fecha_pago"] > settle)].set_index("documento_operacion_id")
+    if "fecha_inversion" not in f.columns:
+        f["fecha_inversion"] = pd.NaT
+    f["viva"] = (f["fecha_inversion"].isna() | (f["fecha_inversion"] <= settle)) & (f["fecha_pago"].isna() | (f["fecha_pago"] > settle))
+    if not incluir_no_vivas:
+        f = f[f["viva"]]
+    f = f.set_index("documento_operacion_id")
     # a. cambios posteriores al cierre: vale el valor_anterior del más antiguo después del cierre (los del día del cierre ya están)
     c = t["cambios"]
     post = c[(c["fecha"].dt.normalize() > settle) & c["campo"].isin(CAMPOS_ASOF) & c["documento_operacion_id"].isin(f.index)]

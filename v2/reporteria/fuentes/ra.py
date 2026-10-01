@@ -9,7 +9,7 @@ from ..modelo import candidato, candidatos_vacios, limpiar_txt
 
 
 def candidatos_ra(pos: pd.DataFrame, ra: pd.DataFrame | None, parametros: dict | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    obj = pos[pos["Tratamiento"].isin(["CASCADA", "CAJA"])]
+    obj = pos[pos["Tratamiento"].isin(["CASCADA", "CAJA", "FACTURA"])]    # FACTURA: respaldo para FNCHI y similares sin fila en Facts
     if obj.empty or ra is None or ra.empty:
         return candidatos_vacios(), alertas.vacias()
     factor = float((parametros or {}).get("ra_unico_factor", 12))
