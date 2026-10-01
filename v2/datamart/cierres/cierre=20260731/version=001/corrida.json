@@ -1,0 +1,61 @@
+{
+  "fecha": "20260731",
+  "ts": "2026-10-01 17:57:03",
+  "estado": "PUBLICADA",
+  "motivo": "",
+  "version": 1,
+  "completitud": "COMPLETA",
+  "n_pendientes": 0,
+  "opciones": {
+    "sin_bbg": true,
+    "sin_sql": false,
+    "sin_facts": false
+  },
+  "anterior_version": null,
+  "fecha_ant": null,
+  "hashes": {
+    "codigo": "f3447ab83ced16bc",
+    "cubo": "1d59852db61b8425",
+    "reglas": "a65a35a862d74e5c",
+    "dim": "f0ea441efb48c4d2",
+    "dim_importado": "2026-10-01 16:18"
+  },
+  "resumen": {
+    "posiciones": 7197,
+    "estado": {
+      "RESUELTO": 7025,
+      "FALTANTE": 172
+    },
+    "fuente": {
+      "FACTURA": 3528,
+      "CERO": 1636,
+      "JPM": 600,
+      "BBG": 402,
+      "RA": 262,
+      "CAJA": 244,
+      "REGLA_DEF": 205,
+      "EXCEPCIONES": 92,
+      "CSHF": 50,
+      "JSONL": 6
+    },
+    "segundos": 92.8
+  },
+  "hojas": [
+    "resumen",
+    "agregados",
+    "alertas_resumen",
+    "alertas",
+    "faltantes",
+    "plantilla_overrides",
+    "plantilla_cajas",
+    "plantilla_dim",
+    "cartera_final",
+    "candidatos",
+    "conversiones",
+    "curvas_drop",
+    "td_detalle",
+    "reglas_aplicadas",
+    "insumos"
+  ],
+  "publicado_en": "2026-10-01 17:58:15"
+}
