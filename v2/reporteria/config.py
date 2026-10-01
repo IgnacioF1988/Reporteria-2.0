@@ -73,6 +73,7 @@ def _en(dirs: list[Path], nombre: str) -> Path:
 
 
 DIM_DEFAULT = Path(__file__).resolve().parents[1] / "dim" / "dimensionales.duckdb"     # versionado en git (REPORTERIA_DIM lo cambia)
+DATAMART_DEFAULT = Path(__file__).resolve().parents[1] / "datamart"                     # versiones publicadas, en git (REPORTERIA_DATAMART)
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ class Rutas:
     fx_exposure: tuple[Path, ...]
     dim: Path
     bix_dirs: tuple[Path, ...]
+    datamart: Path
     reglas: Path
     facturas: Path | None
     jpm: Path | None
@@ -116,11 +118,15 @@ class Rutas:
         return self.outputs / f"REPORTE_{self.fecha}.xlsx"
 
     @property
+    def borradores(self) -> Path:
+        return self.outputs / "borradores"
+
+    @property
     def reporte_anterior(self) -> Path | None:
         return self.outputs.parent / self.fecha_ant / f"REPORTE_{self.fecha_ant}.xlsx" if self.fecha_ant else None
 
     @classmethod
-    def _armar(cls, fecha, raiz, cubo_dir, bix_dirs, mercado, manuales, geneva, outputs, logs, cache, fecha_ant=None, dim=None):
+    def _armar(cls, fecha, raiz, cubo_dir, bix_dirs, mercado, manuales, geneva, outputs, logs, cache, fecha_ant=None, dim=None, datamart=None):
         fx = []
         for d in bix_dirs:
             fx += [Path(p) for p in glob.glob(str(d / "BD_FX_Exposure_*.xlsx")) if not Path(p).name.startswith("~$")]
@@ -131,6 +137,7 @@ class Rutas:
             bd_yld_flag=_en(bix_dirs, "BD_YLD_FLAG.xlsx"), defaulted=_en(bix_dirs, "DEFAULTED.xlsx"),
             homol=_en(bix_dirs, "HOMOL_INSTRUMENTOS.xlsx"), homol_funds=_en(bix_dirs, "HOMOL_FUNDS.xlsx"),
             fx_exposure=tuple(sorted(set(fx))), dim=Path(dim) if dim else DIM_DEFAULT, bix_dirs=tuple(Path(d) for d in bix_dirs),
+            datamart=Path(datamart) if datamart else DATAMART_DEFAULT,
             reglas=manuales / "REGLAS.xlsx",
             facturas=_uno(str(mercado / f"FACTURAS_{fecha}*.xlsx")), jpm=_uno(str(mercado / f"JPM_CEMBI_GBI_{fecha}*.xlsx")),
             ra=mercado / "RA_TIR.xlsx", jsonl=geneva / "bond_schedule.jsonl",
@@ -149,15 +156,18 @@ class Rutas:
         inp = raiz / "01_INPUTS"
         cubo_dir = Path(os.environ.get("RUTA_CUBO_DIR") or inp / "CORPORATIVO")
         bix = Path(os.environ.get("RUTA_BIX") or inp / "CORPORATIVO")
+        datamart = Path(os.environ.get("REPORTERIA_DATAMART") or DATAMART_DEFAULT)
         return cls._armar(fecha, raiz, cubo_dir, [bix, bix / "DIMENSIONALES"], inp / "MERCADO", inp / "MANUALES",
                           inp / "GENEVA", raiz / "02_OUTPUTS" / fecha, raiz / "03_LOGS" / fecha, raiz / "04_CACHE" / fecha,
-                          fecha_ant or _detectar_fecha_ant(raiz / "02_OUTPUTS", fecha), os.environ.get("REPORTERIA_DIM"))
+                          fecha_ant or _detectar_fecha_ant(raiz / "02_OUTPUTS", fecha, datamart), os.environ.get("REPORTERIA_DIM"), datamart)
 
     @classmethod
     def para_pruebas(cls, fecha: str, fixtures: Path, tmp: Path) -> "Rutas":
         """Todo en la carpeta de fixtures; outputs y logs en tmp; caché BBG de fixture (solo lectura); dim = fixtures/dimensionales.duckdb."""
         return cls._armar(fecha, fixtures, fixtures, [fixtures], fixtures, fixtures, fixtures,
-                          tmp / "02_OUTPUTS" / fecha, tmp / "03_LOGS" / fecha, fixtures / "bbg_cache", dim=fixtures / "dimensionales.duckdb")
+                          tmp / "02_OUTPUTS" / fecha, tmp / "03_LOGS" / fecha, fixtures / "bbg_cache",
+                          fecha_ant=_detectar_fecha_ant(tmp / "02_OUTPUTS", fecha, tmp / "datamart"),
+                          dim=fixtures / "dimensionales.duckdb", datamart=tmp / "datamart")
 
     def obligatorias(self) -> dict[str, Path]:
         return {"CUBO": self.cubo, "BD_INSTRUMENTOS": self.bd_instr, "DIMENSIONALES": self.dim, "REGLAS": self.reglas}
@@ -170,8 +180,12 @@ class Rutas:
                 "Atributos": self.atributos[0] if self.atributos else None}
 
 
-def _detectar_fecha_ant(dir_outputs: Path, fecha: str) -> str | None:
-    if not dir_outputs.is_dir():
-        return None
-    prev = sorted(d.name for d in dir_outputs.iterdir() if d.is_dir() and d.name.isdigit() and len(d.name) == 8 and d.name < fecha)
+def _detectar_fecha_ant(dir_outputs: Path, fecha: str, datamart: Path | None = None) -> str | None:
+    """Último cierre anterior con reporte en 02_OUTPUTS o con versión en el datamart (cierres/cierre=YYYYMMDD)."""
+    prev = set()
+    if dir_outputs.is_dir():
+        prev |= {d.name for d in dir_outputs.iterdir() if d.is_dir() and d.name.isdigit() and len(d.name) == 8}
+    if datamart is not None and (Path(datamart) / "cierres").is_dir():
+        prev |= {d.name.split("=", 1)[1] for d in (Path(datamart) / "cierres").iterdir() if d.is_dir() and d.name.startswith("cierre=")}
+    prev = sorted(p for p in prev if p < fecha)
     return prev[-1] if prev else None

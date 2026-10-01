@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import agregados, alertas, cascada, clasificacion, dim, overrides, salida, universo
+from . import agregados, alertas, cascada, clasificacion, datamart, dim, overrides, salida, universo
 from .config import MAX_DIAS_ATRAS_PARIDADES, RISK_COUNTRY_TO_LOCAL_CCY, STRONG_CCY, SUFIJOS_SERIE
+from .adaptadores import datamart as DM
 from .adaptadores import dim as DIM
 from .adaptadores.bbg import Bloomberg, CacheBloomberg, FixtureBloomberg
 from .adaptadores.facts import CacheFacts, FixtureFacts, FuenteFacts
@@ -62,6 +63,7 @@ class Resultado:
     agregados: pd.DataFrame = field(default_factory=pd.DataFrame)
     alertas_resumen: pd.DataFrame = field(default_factory=pd.DataFrame)
     hojas: dict = field(default_factory=dict)
+    borrador: Path | None = None
 
 
 def _opcional(nombre, ruta, lector, log, al):
@@ -125,14 +127,19 @@ def _reglas_aplicadas(pos: pd.DataFrame, reglas) -> pd.DataFrame:
     return pd.DataFrame(filas, columns=["Hoja", "ID", "Regla", "Posiciones"])
 
 
-def _cartera_anterior(rutas: Rutas, log) -> pd.DataFrame | None:
+def _cartera_anterior(rutas: Rutas, log) -> tuple[pd.DataFrame | None, dict | None]:
+    """Última verdad del cierre anterior en el datamart; si no hay versión, el REPORTE Excel de 02_OUTPUTS (como antes)."""
+    v = datamart.ultima_verdad(rutas.datamart, rutas.fecha_ant)
+    if v is not None and (ant := v.posiciones()) is not None:
+        log.info("cierre anterior %s: %d posiciones desde el datamart (%s)", rutas.fecha_ant, len(ant), v.etiqueta)
+        return ant, {"origen": "DATAMART", "cierre": v.cierre, "version": v.numero, "estado": v.estado, "ts": v.ts}
     p = rutas.reporte_anterior
     if p is None or not p.exists():
         log.info("cierre anterior: %s — sin cartera previa (hedge y alertas temporales por regla)", rutas.fecha_ant or "ninguno")
-        return None
+        return None, None
     ant = pd.read_excel(p, sheet_name="cartera_final")
-    log.info("cierre anterior %s: %d posiciones", rutas.fecha_ant, len(ant))
-    return ant
+    log.info("cierre anterior %s: %d posiciones desde %s", rutas.fecha_ant, len(ant), p.name)
+    return ant, {"origen": "EXCEL", "cierre": rutas.fecha_ant, "ruta": str(p)}
 
 
 def _fx(opciones: Opciones, rutas: Rutas) -> FuenteFx:
@@ -187,7 +194,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     al.append(a)
     sufijos = tuple(x.strip() for x in str(reglas.parametros["sufijos_serie"]).split(";") if x.strip()) if "sufijos_serie" in reglas.parametros else SUFIJOS_SERIE
     pos = universo.marcar_familias(pos, sufijos)
-    ant = _cartera_anterior(rutas, log)
+    ant, anterior_version = _cartera_anterior(rutas, log)
     pos, a = universo.asignar_hedge(pos, reglas.fondos, STRONG_CCY, RISK_COUNTRY_TO_LOCAL_CCY, ant)
     al.append(a)
     pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Hedge_Currency",))
@@ -316,7 +323,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     pos["CalcType_exportable"] = pos["CalcType"].map(yld_flag).fillna(pos["CalcType"])
 
     tot = agg[agg["Dimension"].eq("TOTAL")]
-    resumen = {"fecha": rutas.fecha, "fecha_ant": rutas.fecha_ant if ant is not None else None, "posiciones": len(pos),
+    resumen = {"fecha": rutas.fecha, "fecha_ant": rutas.fecha_ant if ant is not None else None, "anterior_version": anterior_version, "posiciones": len(pos),
                "fondos": sorted(int(x) for x in pos["ID_Fund"].unique()),
                "estado": pos["Estado"].value_counts().to_dict(),
                "fuente": pos.loc[pos["Estado"].eq("RESUELTO"), "Fuente"].value_counts().to_dict(),
@@ -350,5 +357,25 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     }
     excel = salida.escribir_excel(hojas, rutas.excel_final)
     (rutas.outputs / f"resumen_corrida_{rutas.fecha}.json").write_text(json.dumps(resumen, ensure_ascii=False, indent=2, default=str))
+    borrador = _escribir_borrador(rutas, opciones, hojas, pos, resumen, anterior_version, rpt, dims, log)
     log.info("listo en %.1fs → %s", resumen["segundos"], excel)
-    return Resultado(pos, cand, todas, tds, getattr(bbg, 'pedidos', []), resumen, excel, agg, alertas_resumen, hojas)
+    return Resultado(pos, cand, todas, tds, getattr(bbg, 'pedidos', []), resumen, excel, agg, alertas_resumen, hojas, borrador)
+
+
+def _escribir_borrador(rutas: Rutas, opciones: Opciones, hojas: dict, pos: pd.DataFrame, resumen: dict, anterior_version: dict | None,
+                       facturas: pd.DataFrame | None, dims, log) -> Path:
+    """Versión completa de la corrida (formato del datamart) en 02_OUTPUTS/{F}/borradores/borrador_{ts}/: `publicar` la copia al datamart."""
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    dir_ = rutas.borradores / f"borrador_{ts}"
+    pendientes = int(pos["Estado"].eq("PENDIENTE_TERMINAL").sum()) if "Estado" in pos.columns else 0
+    corrida = {"fecha": rutas.fecha, "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "estado": "BORRADOR", "motivo": "", "version": None,
+               "completitud": "PARCIAL" if pendientes else "COMPLETA", "n_pendientes": pendientes,
+               "opciones": {"sin_bbg": opciones.sin_bbg, "sin_sql": opciones.sin_sql, "sin_facts": opciones.sin_facts},
+               "anterior_version": anterior_version, "fecha_ant": resumen.get("fecha_ant"),
+               "hashes": {"codigo": DM.hash_codigo(), "cubo": DM.hash_archivo(rutas.cubo), "reglas": DM.hash_archivo(rutas.reglas),
+                          "dim": DM.hash_archivo(rutas.dim), "dim_importado": dims.meta.get("importado", "")},
+               "resumen": {k: resumen[k] for k in ("posiciones", "estado", "fuente", "segundos") if k in resumen}}
+    DM.escribir_version(dir_, hojas, corrida, pos)
+    DM.copiar_insumos(rutas, dir_, {"facturas_al_cierre": facturas} if facturas is not None else None)
+    log.info("borrador %s (publicar con: reporteria publicar --fecha %s)", dir_.name, rutas.fecha)
+    return dir_

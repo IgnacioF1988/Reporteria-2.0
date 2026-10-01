@@ -36,11 +36,31 @@ def check(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | N
             faltan += 1
             typer.echo(f"  [ERR] REGLAS.xlsx: {e}")
     typer.echo(f"  cierre anterior detectado: {r.fecha_ant or '(ninguno)'}")
+    for linea in _estado_datamart(r):
+        typer.echo(f"  {linea}")
     for linea in _estado_dim(r):
         typer.echo(f"  {linea}")
     for linea in _estado_entorno(r):
         typer.echo(f"  {linea}")
     raise typer.Exit(2 if faltan else 0)
+
+
+def _estado_datamart(r: Rutas) -> list[str]:
+    """Datamart: cierres con versión, estado del cierre actual, borradores sin publicar."""
+    from . import datamart as DMV
+    from .adaptadores import datamart as DM
+    todos = DM.cierres(r.datamart)
+    vs = DMV.versiones_de(r.datamart, r.fecha) if r.fecha in todos else []
+    bor = DMV.borradores(r.borradores, r.fecha)
+    if vs:
+        est = f"v{vs[-1].numero:03d} {vs[-1].estado}" + (f" ({vs[-1].completitud})" if vs[-1].completitud != "COMPLETA" else "")
+    else:
+        est = "sin versión publicada"
+    out = [f"[{'OK ' if todos else 'opc. '}] datamart {r.datamart}: {len(todos)} cierre(s) con versión{' (último ' + todos[-1] + ')' if todos else ''}; "
+           f"cierre {r.fecha}: {est}; borradores sin publicar: {len(bor)}"]
+    if bor and not vs:
+        out.append(f"[AVISO] hay {len(bor)} borrador(es) del cierre {r.fecha} sin publicar → reporteria publicar --fecha {r.fecha}")
+    return out
 
 
 def _estado_dim(r: Rutas) -> list[str]:
@@ -199,22 +219,105 @@ def migrar_manuales_cmd(fecha: str = typer.Option(..., help="Cierre YYYYMMDD (pa
 
 @app.command()
 def comparar(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"),
-             otro: Path = typer.Option(..., help="Otro REPORTE_*.xlsx (p. ej. la corrida con terminal)"),
+             otro: Path | None = typer.Option(None, help="Otro REPORTE_*.xlsx (p. ej. la corrida con terminal)"),
+             version_a: int | None = typer.Option(None, "--version-a", help="Versión del datamart como lado A (default: REPORTE del cierre)"),
+             version_b: int | None = typer.Option(None, "--version-b", help="Versión del datamart como lado B"),
              raiz: Path | None = None):
-    """Compara la cartera_final del cierre con otro reporte (terminal vs --sin-bbg). Exit 0 sin diferencias, 1 con diferencias."""
+    """Compara dos carteras del cierre: el REPORTE con otro Excel, o dos versiones del datamart (--version-a/--version-b). Exit 1 si hay diferencias."""
     import datetime as dt
     import pandas as pd
+    from . import datamart as DMV
     from .salida import comparar_carteras
     r = Rutas.desde_env(fecha, raiz)
-    a, b = pd.read_excel(r.excel_final, sheet_name="cartera_final"), pd.read_excel(otro, sheet_name="cartera_final")
+
+    def lado(version, ruta):
+        if version is not None:
+            v = DMV.resolver_version(r.datamart, fecha, version=version)
+            if v is None:
+                typer.echo(f"no existe la versión {version} del cierre {fecha}")
+                raise typer.Exit(2)
+            return v.posiciones(), v.etiqueta
+        return pd.read_excel(ruta, sheet_name="cartera_final"), Path(ruta).name
+    if otro is None and version_b is None:
+        typer.echo("indique --otro RUTA o --version-b N")
+        raise typer.Exit(2)
+    a, na = lado(version_a, r.excel_final)
+    b, nb = lado(version_b, otro)
     dif = comparar_carteras(a, b)
     salida = r.outputs / f"comparacion_{dt.datetime.now():%Y%m%d_%H%M%S}.csv"
+    salida.parent.mkdir(parents=True, exist_ok=True)
     dif.to_csv(salida, index=False)
-    typer.echo(f"{len(dif)} diferencias entre {r.excel_final.name} y {Path(otro).name} → {salida}")
+    typer.echo(f"{len(dif)} diferencias entre {na} y {nb} → {salida}")
     if len(dif):
         typer.echo(dif.groupby("Campo").size().to_string())
     raise typer.Exit(1 if len(dif) else 0)
 
+
+
+# ── datamart: versiones del cierre ──────────────────────────────────────────────────────────────────────────────────
+def _version_o_salir(r: Rutas, fecha: str, publicada: bool, version: int | None, conocimiento: str | None):
+    from . import datamart as DMV
+    v = DMV.resolver_version(r.datamart, fecha, publicada=publicada, version=version, conocimiento=conocimiento)
+    if v is None:
+        typer.echo(f"el cierre {fecha} no tiene versión que cumpla lo pedido en {r.datamart} (ver `reporteria versiones --fecha {fecha}`)")
+        raise typer.Exit(2)
+    return v
+
+
+@app.command()
+def publicar(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"),
+             borrador: str | None = typer.Option(None, help="Nombre o timestamp del borrador (default: el último de 02_OUTPUTS/F/borradores)"),
+             motivo: str = typer.Option("", help="Obligatorio al re-expresar: qué cambió"),
+             reexpresar: bool = typer.Option(False, "--reexpresar", help="El cierre ya tiene versión publicada: agregar una re-expresión"),
+             raiz: Path | None = None):
+    """Fija la versión oficial del cierre copiando un borrador al datamart (version=NNN). Después: git add datamart && git commit."""
+    from . import datamart as DMV
+    r = Rutas.desde_env(fecha, raiz)
+    bors = DMV.borradores(r.borradores, fecha)
+    if not bors:
+        typer.echo(f"no hay borradores en {r.borradores}: corra `reporteria correr --fecha {fecha}` primero")
+        raise typer.Exit(2)
+    elegido = bors[-1] if borrador is None else next((b for b in bors if borrador in b.ruta.name), None)
+    if elegido is None:
+        typer.echo(f"borrador '{borrador}' no encontrado; disponibles: {[b.ruta.name for b in bors]}")
+        raise typer.Exit(2)
+    try:
+        v = DMV.publicar(r.datamart, fecha, elegido.ruta, motivo, reexpresar)
+    except ValueError as e:
+        typer.echo(f"ERROR: {e}")
+        raise typer.Exit(2)
+    typer.echo(f"{v.etiqueta} ← {elegido.ruta.name} (completitud {v.completitud}) → {v.ruta}")
+    typer.echo(f"ahora: git add {r.datamart} && git commit -m \"cierre {fecha} v{v.numero:03d} {v.estado}\" && git push")
+
+
+@app.command()
+def versiones(fecha: str | None = typer.Option(None, help="Cierre YYYYMMDD (default: todos)"), raiz: Path | None = None):
+    """Lista las versiones del datamart (cierre, versión, estado, motivo, fecha de publicación, completitud, cierre anterior usado)."""
+    from .adaptadores import datamart as DM
+    r = Rutas.desde_env(fecha or "00000000", raiz)
+    t = DM.listar_versiones(r.datamart, fecha)
+    if t.empty:
+        typer.echo(f"sin versiones en {r.datamart}" + (f" para {fecha}" if fecha else ""))
+        raise typer.Exit(0)
+    for _, f in t.iterrows():
+        typer.echo(f"  {f['cierre']}  v{int(f['version']):03d}  {f['estado']:12} {f['completitud'] or 'COMPLETA':9} {f['ts']:19}  anterior {f['anterior'] or '-':16} {f['motivo']}")
+
+
+@app.command()
+def reporte(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"),
+            publicada: bool = typer.Option(False, "--publicada", help="Lo reportado (primera versión publicada)"),
+            version: int | None = typer.Option(None, help="Una versión concreta"),
+            conocimiento: str | None = typer.Option(None, help="Lo que se sabía al YYYYMMDD (última versión con fecha ≤ ese día)"),
+            salida: Path | None = typer.Option(None, help="Excel de salida (default: 02_OUTPUTS/F/REPORTE_F_vNNN.xlsx)"),
+            raiz: Path | None = None):
+    """Regenera el Excel del cierre desde el datamart: última verdad por defecto, o --publicada / --version N / --conocimiento D."""
+    from .salida import escribir_excel
+    r = Rutas.desde_env(fecha, raiz)
+    v = _version_o_salir(r, fecha, publicada, version, conocimiento)
+    hojas = v.hojas()
+    destino = Path(salida) if salida else r.outputs / f"REPORTE_{fecha}_v{v.numero:03d}.xlsx"
+    escribir_excel(hojas, destino)
+    typer.echo(f"{v.etiqueta} ({v.completitud}; publicada {v.ts}; motivo: {v.motivo or '-'}) → {destino}")
 
 
 # ── dim: dimensionales locales ───────────────────────────────────────────────────────────────────────────────────────

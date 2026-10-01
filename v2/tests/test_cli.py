@@ -156,3 +156,37 @@ def test_dim_importar_exportar_editar_validar_probar(env_dim, tmp_path):
             df.to_excel(w, sheet_name=h, index=False)
     r = runner.invoke(app, ["dim", "importar", "--excel", str(salida), "--dim", str(destino)])
     assert r.exit_code == 2 and "Issue_Type_Code=99" in r.output and "no se escribió nada" in r.output
+
+
+def test_publicar_versiones_reporte_y_comparar_versiones(env_dim, monkeypatch):
+    import pandas as pd
+    raiz = env_dim
+    dm = raiz / "datamart"
+    monkeypatch.setenv("REPORTERIA_DATAMART", str(dm))
+    r = runner.invoke(app, ["publicar", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert r.exit_code == 2 and "no hay borradores" in r.output
+    r = runner.invoke(app, ["correr", "--fecha", "20260731", "--raiz", str(raiz), "--sin-bbg", "--sin-sql", "--sin-facts"])
+    assert r.exit_code in (0, 1), r.output
+    r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert "borradores sin publicar: 1" in r.output and "sin publicar → reporteria publicar" in r.output
+    r = runner.invoke(app, ["publicar", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert r.exit_code == 0 and "v001 PUBLICADA" in r.output and "git add" in r.output, r.output
+    assert (dm / "cierres" / "cierre=20260731" / "version=001" / "corrida.json").exists()
+    r = runner.invoke(app, ["publicar", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert r.exit_code == 2 and "--reexpresar" in r.output
+    r = runner.invoke(app, ["publicar", "--fecha", "20260731", "--raiz", str(raiz), "--reexpresar", "--motivo", "prueba"])
+    assert r.exit_code == 0 and "v002 REEXPRESADA" in r.output
+    r = runner.invoke(app, ["versiones", "--raiz", str(raiz)])
+    assert r.exit_code == 0 and "v001  PUBLICADA" in r.output and "v002  REEXPRESADA" in r.output and "prueba" in r.output
+    r = runner.invoke(app, ["reporte", "--fecha", "20260731", "--raiz", str(raiz), "--publicada"])
+    assert r.exit_code == 0, r.output
+    rep = raiz / "02_OUTPUTS" / "20260731" / "REPORTE_20260731_v001.xlsx"
+    assert rep.exists() and set(pd.ExcelFile(rep).sheet_names) >= {"resumen", "cartera_final", "alertas"}
+    r = runner.invoke(app, ["reporte", "--fecha", "20260731", "--raiz", str(raiz), "--version", "7"])
+    assert r.exit_code == 2
+    r = runner.invoke(app, ["comparar", "--fecha", "20260731", "--raiz", str(raiz), "--version-a", "1", "--version-b", "2"])
+    assert r.exit_code == 0 and "0 diferencias" in r.output, r.output
+    r = runner.invoke(app, ["comparar", "--fecha", "20260731", "--raiz", str(raiz), "--version-b", "1"])
+    assert r.exit_code == 0 and "0 diferencias" in r.output, r.output
+    r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert "cierre 20260731: v002 REEXPRESADA" in r.output

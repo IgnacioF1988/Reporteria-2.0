@@ -1,1 +1,2 @@
 *.duckdb binary
+*.parquet binary -diff
