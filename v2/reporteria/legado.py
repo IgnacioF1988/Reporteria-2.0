@@ -113,9 +113,9 @@ def importar_cache_legacy(legacy: Path, cache: Path, fecha: str) -> dict[str, in
 
 
 # ── Migración de manuales del legacy a REGLAS.xlsx ──────────────────────────────────────────────────────────────
-def _fondos_alias(bd_funds_path: Path, homol_funds_path: Path | None) -> dict[str, int]:
-    """Nombre (upper) → ID_Fund desde BD_FUNDS (FundShortName, NombreTupungato, FundName) y HOMOL_FUNDS (Portfolio)."""
-    f = pd.read_excel(bd_funds_path)
+def _fondos_alias(bd_funds: Path | pd.DataFrame, homol_funds_path: Path | None) -> dict[str, int]:
+    """Nombre (upper) → ID_Fund desde BD_FUNDS (FundShortName, NombreTupungato, FundName; ruta o tabla dim_fondos) y HOMOL_FUNDS (Portfolio)."""
+    f = bd_funds if isinstance(bd_funds, pd.DataFrame) else pd.read_excel(bd_funds)
     out = {}
     for col in ("FundShortName", "NombreTupungato", "FundName"):
         if col in f.columns:
@@ -314,3 +314,95 @@ def fusionar_reglas(reglas_path: Path, nuevas: dict[str, pd.DataFrame], salida: 
             d.to_excel(w, sheet_name=n, index=False)
     leer_reglas(salida, fondos_validos)        # lanza ValueError si la fusión no es válida
     return agregadas
+
+
+# ── Dimensionales (H8): BD_BalanceSheet + BD_FX_Exposure_* + catálogos → dimensionales.duckdb ─────────────────────────
+def migrar_dimensionales(bix_dirs: list[Path]) -> tuple["Dimensionales", pd.DataFrame]:
+    """Compacta BD_BalanceSheet (genérica y variante _MRCLP), las BD_FX_Exposure_{fondo} y los catálogos.
+
+    FX: la tabla de MLDL pasa a filas genéricas (todos los fondos); las demás tablas por fondo se compactan con ID_Fund.
+    Variante `Investment_Type_CarteraFI_MRCLP`: solo las llaves que difieren de la genérica, como filas ID_Fund=MRCLP.
+    Devuelve (Dimensionales, informe[Fuente, Filas_leidas, Filas_generadas, Avisos]).
+    """
+    import glob as _glob
+    from .adaptadores.dim import ARCHIVO_CATALOGO, Dimensionales
+    from .config import _en
+    from .dim import ATRIBUTOS, COLS_LLAVE, compactar, fusionar_filas, normalizar
+    from .lectura.maestros import _hoja, fondo_de_fx_exposure, leer_fx_exposure, normalizar_bd_funds
+    from .modelo import CODIGOS
+
+    bix_dirs = [Path(d) for d in bix_dirs]
+    informe, partes = [], []
+    cols = ["BalanceSheet"] + CODIGOS
+
+    fondos = _hoja(_en(bix_dirs, "BD_FUNDS.xlsx"), "BD_FUNDS")
+    bd_funds = normalizar_bd_funds(fondos)
+    informe.append(("BD_FUNDS", len(fondos), len(fondos), ""))
+
+    bs = _hoja(_en(bix_dirs, "BD_BalanceSheet.xlsx"), "BalSheet").rename(columns={"ASSET_TYPE": "BalanceSheet"})
+    etiquetas = {"Bucket": "Investment_Type_CarteraFI", "Ficha_FI": "Investment_Type_Ficha_FI"}
+    avisos = []
+    for atributo, col in etiquetas.items():
+        if col not in bs.columns:
+            avisos.append(f"sin columna {col}")
+            continue
+        t = bs.rename(columns={col: atributo})
+        vacios = int(limpiar_txt(t[atributo]).eq("").sum())
+        if vacios:
+            avisos.append(f"{vacios} llaves sin {atributo} (heredan el de sus vecinas cuando una fila comodín las cubre; el resto sale en plantilla_dim)")
+        f = compactar(t, cols, atributo)
+        f["Origen_Migracion"] = f"BD_BalanceSheet.{col}"
+        partes.append(f)
+        informe.append((f"BD_BalanceSheet.{col}", len(bs), len(f), "; ".join(avisos)))
+        avisos = []
+    base = normalizar(pd.concat(partes, ignore_index=True))
+    variantes = [c for c in bs.columns if c.startswith("Investment_Type_CarteraFI_")]
+    for col in variantes:
+        sufijo = col.replace("Investment_Type_CarteraFI_", "").upper()
+        m = bd_funds[bd_funds["FundShortName"].str.upper() == sufijo]
+        if m.empty:
+            informe.append((f"BD_BalanceSheet.{col}", len(bs), 0, f"fondo '{sufijo}' no está en BD_FUNDS: se omite"))
+            continue
+        fid = int(m["ID_Fund"].iloc[0])
+        t = bs.drop(columns=["Investment_Type_CarteraFI"]).rename(columns={col: "Bucket"})
+        f = compactar(t, cols, "Bucket", base=base, fondo=fid)
+        f["Origen_Migracion"] = f"BD_BalanceSheet.{col}"
+        partes.append(f)
+        informe.append((f"BD_BalanceSheet.{col}", len(bs), len(f), f"ID_Fund={fid}; reemplaza las REGLAS/clasificacion con Criterio=BalSheetKey de ese fondo"))
+
+    fx_paths = sorted({Path(p) for d in bix_dirs for p in _glob.glob(str(d / "BD_FX_Exposure_*.xlsx")) if not Path(p).name.startswith("~$")})
+    for p in fx_paths:
+        fid = fondo_de_fx_exposure(p, bd_funds)
+        tabla = leer_fx_exposure(p)
+        cfx = [c for c in tabla.columns if c != "FX_Exposure"]
+        if fid is None:
+            informe.append((p.name, len(tabla), 0, "fondo no encontrado en BD_FUNDS: se omite"))
+            continue
+        generica = p.stem.upper().endswith("_MLDL")
+        f = compactar(tabla, cfx, "FX_Exposure", fijas=()) if generica else compactar(tabla, cfx, "FX_Exposure", fijas=(), fondo=fid)
+        if generica:
+            f["ID_Fund"] = pd.NA
+        f["Origen_Migracion"] = p.name
+        partes.append(f)
+        informe.append((p.name, len(tabla), len(f), "genérica (todos los fondos)" if generica else f"ID_Fund={fid}"))
+
+    clasif = fusionar_filas(partes)
+    catalogos = {}
+    for tabla, archivo in ARCHIVO_CATALOGO.items():
+        ruta = _en(bix_dirs, archivo)
+        if ruta.exists():
+            df = _hoja(ruta, archivo.replace(".xlsx", ""))
+            catalogos[tabla] = df
+            informe.append((archivo, len(df), len(df), ""))
+        else:
+            informe.append((archivo, 0, 0, "no encontrado"))
+    monedas = _hoja(_en(bix_dirs, "BD_Monedas.xlsx"), "Monedas")
+    informe.append(("BD_Monedas", len(monedas), len(monedas), ""))
+    ruta_yld = _en(bix_dirs, "BD_YLD_FLAG.xlsx")
+    yld = _hoja(ruta_yld, "BD_YLD_FLAG") if ruta_yld.exists() else pd.DataFrame(columns=["CalcType_final", "CalcType_exportable"])
+    informe.append(("BD_YLD_FLAG", len(yld), len(yld), "" if ruta_yld.exists() else "no encontrado"))
+    import datetime as _dt
+    dims = Dimensionales(clasificacion=clasif, catalogos=catalogos, fondos=fondos, monedas=monedas, yld_flag=yld,
+                         meta={"importado": _dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "origen": "; ".join(str(d) for d in bix_dirs),
+                               "version_esquema": "1"})
+    return dims, pd.DataFrame(informe, columns=["Fuente", "Filas_leidas", "Filas_generadas", "Avisos"])

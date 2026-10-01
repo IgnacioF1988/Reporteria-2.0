@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import agregados, alertas, cascada, clasificacion, overrides, salida, universo
+from . import agregados, alertas, cascada, clasificacion, dim, overrides, salida, universo
 from .config import MAX_DIAS_ATRAS_PARIDADES, RISK_COUNTRY_TO_LOCAL_CCY, STRONG_CCY, SUFIJOS_SERIE
+from .adaptadores import dim as DIM
 from .adaptadores.bbg import Bloomberg, CacheBloomberg, FixtureBloomberg
 from .adaptadores.facts import CacheFacts, FixtureFacts, FuenteFacts
 from .adaptadores.fx_sql import CacheFx, FixtureFx, FuenteFx
@@ -172,11 +173,15 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     al: list[pd.DataFrame] = []
 
     cubo = leer_cubo(rutas.cubo)
-    bd_funds = M.leer_bd_funds(rutas.bd_funds)
+    dims = DIM.leer(rutas.dim)
+    bd_funds = dims.bd_funds()
+    nf = int(dims.clasificacion["ID_Fund"].notna().sum())
+    log.info("DIM %s: clasificacion %d filas (%d genéricas, %d por fondo), importado %s", rutas.dim.name, len(dims.clasificacion),
+             len(dims.clasificacion) - nf, nf, dims.meta.get("importado", "?"))
     fondos_validos = set(bd_funds["ID_Fund"]) | set(cubo["ID_Fund"])
     reglas = leer_reglas(rutas.reglas, fondos_validos)
     log.info("CUBO: %d filas, fondos %s", len(cubo), sorted(cubo["ID_Fund"].unique()))
-    pos, a = universo.armar_universo(cubo, M.leer_bd_instrumentos(rutas.bd_instr), bd_funds, M.leer_bd_monedas(rutas.bd_monedas))
+    pos, a = universo.armar_universo(cubo, M.leer_bd_instrumentos(rutas.bd_instr), bd_funds, dims.bd_monedas())
     al.append(a)
     pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Risk_Currency", "Risk_Country", "Indice"))
     al.append(a)
@@ -188,14 +193,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Hedge_Currency",))
     al.append(a)
 
-    fx = {}
-    for p in rutas.fx_exposure:
-        fid = M.fondo_de_fx_exposure(p, bd_funds)
-        if fid is None:
-            al.append(alertas.emitir("FX_EXPOSURE_SIN_FONDO", "INFO", detalle=p.name, ambito="CORRIDA"))
-        else:
-            fx[fid] = M.leer_fx_exposure(p)
-    pos, a = clasificacion.clasificar(pos, M.leer_bd_balance_sheet(rutas.bd_balance), reglas.buckets, reglas.clasificacion, fx)
+    pos, a = clasificacion.clasificar(pos, dims.clasificacion, reglas.buckets, reglas.clasificacion, rutas.settle)
     al.append(a)
     pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Bucket",))
     al.append(a)
@@ -314,7 +312,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
                            [(k, str(v) if v else "", "OK" if v and Path(v).exists() else "OPCIONAL_AUSENTE") for k, v in rutas.opcionales().items()],
                            columns=["Insumo", "Ruta", "Estado"])
     reglas_aplicadas = _reglas_aplicadas(pos, reglas)
-    yld_flag = M.leer_yld_flag(rutas.bd_yld_flag) if Path(rutas.bd_yld_flag).exists() else {}
+    yld_flag = dims.yld_flag_dict()
     pos["CalcType_exportable"] = pos["CalcType"].map(yld_flag).fillna(pos["CalcType"])
 
     tot = agg[agg["Dimension"].eq("TOTAL")]
@@ -341,6 +339,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         "faltantes": faltantes[[c for c in COLS_CARTERA if c in faltantes.columns]],
         "plantilla_overrides": plantilla,
         "plantilla_cajas": salida.plantilla_cajas(pos, reglas.cajas, rutas.settle),
+        "plantilla_dim": dim.plantilla_sin_dim(pos),
         "cartera_final": pos[[c for c in COLS_CARTERA if c in pos.columns]],
         "candidatos": cand,
         "conversiones": conversiones,

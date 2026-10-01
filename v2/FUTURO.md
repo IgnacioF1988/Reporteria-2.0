@@ -16,3 +16,4 @@
 14. Curvas de drops para ARS/UYU y basis para PEN/BRL (hoy DIRECT con una sola curva, como el legacy).
 15. XCCY para papeles hedgeados que no están en USD (EUR/GBP → moneda local): hoy solo se usa el XCCY de BBG si existe.
 16. Facts: carga incremental diaria con `bi_cambios --cambios-desde` (hoy se bajan las tres tablas completas por cierre, pocos segundos) y foto diaria del RPT para precio, valorización y devengo de cada factura.
+17. Dimensionales: vigencia histórica por cierre en `dim_clasificacion` (hoy `Vigente_Desde/Hasta` existen pero la migración no las usa) y mover BD_INSTRUMENTOS / HOMOL / DEFAULTED al DuckDB cuando el BIX exponga una extracción estable; carga incremental desde el BIX en vez de `dim importar --bix --reemplazar`.

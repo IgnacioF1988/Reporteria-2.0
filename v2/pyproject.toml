@@ -3,7 +3,7 @@ name = "reporteria"
 version = "0.1.0"
 description = "Yield y Duration por posición para los fondos: pipeline de cierre mensual"
 requires-python = ">=3.11"
-dependencies = ["pandas>=2.2", "numpy", "scipy", "openpyxl", "python-dotenv", "typer"]
+dependencies = ["pandas>=2.2", "numpy", "scipy", "openpyxl", "python-dotenv", "typer", "duckdb>=1.0"]
 
 [project.optional-dependencies]
 bbg = ["xbbg", "pyarrow>=22"]

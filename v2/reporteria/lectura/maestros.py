@@ -38,7 +38,12 @@ def leer_bd_instrumentos(path: Path) -> pd.DataFrame:
 
 
 def leer_bd_funds(path: Path) -> pd.DataFrame:
-    df = _hoja(path, "BD_FUNDS")
+    return normalizar_bd_funds(_hoja(path, "BD_FUNDS"))
+
+
+def normalizar_bd_funds(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
     short = next((c for c in df.columns if "shortname" in c.lower().replace("_", "")), None)
     base = next((c for c in df.columns if "basecurrency" in c.lower().replace("_", "")), None)
     if short is None or base is None or "ID_Fund" not in df.columns:
@@ -64,14 +69,22 @@ def leer_bd_balance_sheet(path: Path) -> pd.DataFrame:
 
 
 def leer_bd_monedas(path: Path) -> pd.DataFrame:
-    df = _hoja(path, "Monedas")
+    return normalizar_bd_monedas(_hoja(path, "Monedas"))
+
+
+def normalizar_bd_monedas(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame({"id_CURR": pd.to_numeric(df["id_CURR"], errors="coerce"), "Code": limpiar_txt(df["Code"]).str.upper(),
                         "Supramoneda": limpiar_txt(df["Code_Supramoneda"]).str.upper() if "Code_Supramoneda" in df.columns else ""})
     return out.dropna(subset=["id_CURR"]).astype({"id_CURR": int}).drop_duplicates("id_CURR").reset_index(drop=True)
 
 
 def leer_yld_flag(path: Path) -> dict[str, str]:
-    df = _hoja(path, "BD_YLD_FLAG")
+    return normalizar_yld_flag(_hoja(path, "BD_YLD_FLAG"))
+
+
+def normalizar_yld_flag(df: pd.DataFrame) -> dict[str, str]:
+    if df is None or df.empty or not {"CalcType_final", "CalcType_exportable"} <= set(df.columns):
+        return {}
     return dict(zip(limpiar_txt(df["CalcType_final"]), limpiar_txt(df["CalcType_exportable"])))
 
 

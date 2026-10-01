@@ -72,6 +72,9 @@ def _en(dirs: list[Path], nombre: str) -> Path:
     return dirs[0] / nombre
 
 
+DIM_DEFAULT = Path(__file__).resolve().parents[1] / "dim" / "dimensionales.duckdb"     # versionado en git (REPORTERIA_DIM lo cambia)
+
+
 @dataclass(frozen=True)
 class Rutas:
     fecha: str
@@ -86,6 +89,8 @@ class Rutas:
     homol: Path
     homol_funds: Path
     fx_exposure: tuple[Path, ...]
+    dim: Path
+    bix_dirs: tuple[Path, ...]
     reglas: Path
     facturas: Path | None
     jpm: Path | None
@@ -115,7 +120,7 @@ class Rutas:
         return self.outputs.parent / self.fecha_ant / f"REPORTE_{self.fecha_ant}.xlsx" if self.fecha_ant else None
 
     @classmethod
-    def _armar(cls, fecha, raiz, cubo_dir, bix_dirs, mercado, manuales, geneva, outputs, logs, cache, fecha_ant=None):
+    def _armar(cls, fecha, raiz, cubo_dir, bix_dirs, mercado, manuales, geneva, outputs, logs, cache, fecha_ant=None, dim=None):
         fx = []
         for d in bix_dirs:
             fx += [Path(p) for p in glob.glob(str(d / "BD_FX_Exposure_*.xlsx")) if not Path(p).name.startswith("~$")]
@@ -125,7 +130,8 @@ class Rutas:
             bd_balance=_en(bix_dirs, "BD_BalanceSheet.xlsx"), bd_monedas=_en(bix_dirs, "BD_Monedas.xlsx"),
             bd_yld_flag=_en(bix_dirs, "BD_YLD_FLAG.xlsx"), defaulted=_en(bix_dirs, "DEFAULTED.xlsx"),
             homol=_en(bix_dirs, "HOMOL_INSTRUMENTOS.xlsx"), homol_funds=_en(bix_dirs, "HOMOL_FUNDS.xlsx"),
-            fx_exposure=tuple(sorted(set(fx))), reglas=manuales / "REGLAS.xlsx",
+            fx_exposure=tuple(sorted(set(fx))), dim=Path(dim) if dim else DIM_DEFAULT, bix_dirs=tuple(Path(d) for d in bix_dirs),
+            reglas=manuales / "REGLAS.xlsx",
             facturas=_uno(str(mercado / f"FACTURAS_{fecha}*.xlsx")), jpm=_uno(str(mercado / f"JPM_CEMBI_GBI_{fecha}*.xlsx")),
             ra=mercado / "RA_TIR.xlsx", jsonl=geneva / "bond_schedule.jsonl",
             indexes=_uno(str(mercado / f"Carga_Indexes_{fecha}*.csv")),
@@ -145,21 +151,19 @@ class Rutas:
         bix = Path(os.environ.get("RUTA_BIX") or inp / "CORPORATIVO")
         return cls._armar(fecha, raiz, cubo_dir, [bix, bix / "DIMENSIONALES"], inp / "MERCADO", inp / "MANUALES",
                           inp / "GENEVA", raiz / "02_OUTPUTS" / fecha, raiz / "03_LOGS" / fecha, raiz / "04_CACHE" / fecha,
-                          fecha_ant or _detectar_fecha_ant(raiz / "02_OUTPUTS", fecha))
+                          fecha_ant or _detectar_fecha_ant(raiz / "02_OUTPUTS", fecha), os.environ.get("REPORTERIA_DIM"))
 
     @classmethod
     def para_pruebas(cls, fecha: str, fixtures: Path, tmp: Path) -> "Rutas":
-        """Todo en la carpeta de fixtures; outputs y logs en tmp; caché BBG de fixture (solo lectura)."""
+        """Todo en la carpeta de fixtures; outputs y logs en tmp; caché BBG de fixture (solo lectura); dim = fixtures/dimensionales.duckdb."""
         return cls._armar(fecha, fixtures, fixtures, [fixtures], fixtures, fixtures, fixtures,
-                          tmp / "02_OUTPUTS" / fecha, tmp / "03_LOGS" / fecha, fixtures / "bbg_cache")
+                          tmp / "02_OUTPUTS" / fecha, tmp / "03_LOGS" / fecha, fixtures / "bbg_cache", dim=fixtures / "dimensionales.duckdb")
 
     def obligatorias(self) -> dict[str, Path]:
-        return {"CUBO": self.cubo, "BD_INSTRUMENTOS": self.bd_instr, "BD_FUNDS": self.bd_funds,
-                "BD_BalanceSheet": self.bd_balance, "BD_Monedas": self.bd_monedas, "REGLAS": self.reglas}
+        return {"CUBO": self.cubo, "BD_INSTRUMENTOS": self.bd_instr, "DIMENSIONALES": self.dim, "REGLAS": self.reglas}
 
     def opcionales(self) -> dict[str, Path | None]:
-        return {"DEFAULTED": self.defaulted, "BD_YLD_FLAG": self.bd_yld_flag, "HOMOL_INSTRUMENTOS": self.homol,
-                "HOMOL_FUNDS": self.homol_funds, "BD_FX_Exposure": self.fx_exposure[0] if self.fx_exposure else None,
+        return {"DEFAULTED": self.defaulted, "HOMOL_INSTRUMENTOS": self.homol, "HOMOL_FUNDS": self.homol_funds,
                 "FACTURAS": self.facturas, "JPM": self.jpm, "RA_TIR": self.ra, "bond_schedule": self.jsonl,
                 "Carga_Indexes": self.indexes, "CurvasSoberanas": self.curvas_sob, "Paridades": self.paridades,
                 "EXCEPCIONES": self.excepciones[0] if self.excepciones else None,

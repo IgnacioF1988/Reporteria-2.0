@@ -1,0 +1,200 @@
+id_CURR,Code,Currency_Description,Code_Supramoneda
+1,USD,U.S. Dollars,USD
+2,HundredMinusYield,Price By Yield,HundredMinusYield
+3,ADP,Andorran Peseta,ADP
+4,AED,Uae Dirham,AED
+5,AFA,Afghanistan Afghani,AFA
+6,ALL,Albanian Lek,ALL
+7,AMD,Armenian Dram,AMD
+8,ANG,Netherlands Antilles Guilder,ANG
+9,AOA,Angolan Kwanza,AOA
+10,AOR,Angolan Kwanza Reajustado,AOR
+11,ARS,Argentine Peso,ARS
+12,ATS,Austrian Schilling,ATS
+13,AUD,Australian Dollar,AUD
+14,AWG,Aruban Guilder,AWG
+15,AZM,Azerbaijan Manet,AZM
+16,BAD,Bosnia & Herzegovina Dinar,BAD
+17,BAM,Bosnia And Herzegovina Convertible Mark,BAM
+18,BBD,Barbados Dollar,BBD
+19,BDT,Bangladesh Taka,BDT
+20,BEF,Belgian Franc,BEF
+21,BGL,Bulgarian Lev,BGL
+22,BGN,Bulgarian New Lev,BGN
+23,BHD,Bahrain Dinar,BHD
+24,BIF,Burundi Franc,BIF
+25,BMD,Bermuda Dollar,BMD
+26,BND,Brunei Dollar,BND
+27,BOB,Bolivian Boliviano,BOB
+28,BOV,Bolivian Mvdol,BOV
+29,BRL,Brazilian Real,BRL
+30,BSD,Bahamas Dollar,BSD
+31,BTN,Bhutan Ngultrum,BTN
+32,BWP,Botswana Pula,BWP
+33,BYR,Belarus Rouble,BYR
+34,BZD,Belize Dollar,BZD
+35,CAD,Canadian Dollar,CAD
+36,CDF,Congo Franc,CDF
+37,CHF,Swiss Franc,CHF
+38,CLF,Chilean Unidades De Fomento,CLP
+39,CLP,Chilean Peso,CLP
+40,CNY,Chinese Renminbi Yuan,CNY
+41,COP,Colombian Peso,COP
+42,CRC,Costa Rican Colon,CRC
+43,CSD,Serbian Dinar,CSD
+44,CUP,Cuban Peso,CUP
+45,CVE,Cape Verde Escudo,CVE
+46,CYP,Cyprus Pound,CYP
+47,CZK,Czech Koruna,CZK
+48,DDM,East German Ostmark,DDM
+49,DEM,German Mark,DEM
+50,DJF,Djibouti Franc,DJF
+51,DKK,Danish Krone,DKK
+52,DOP,Dominican Republic Peso,DOP
+53,DZD,Algerian Dinar,DZD
+54,ECS,Ecuadorean Sucre,ECS
+55,ECV,Ecuador Unidad de Valor Constante,ECV
+56,EEK,Estonian Kroon,EEK
+57,EGP,Egyptian Pound,EGP
+58,ERN,Eritrean Nakfa,ERN
+59,ESP,Spanish Peseta,ESP
+60,ETB,Ethiopian Birr,ETB
+61,EUR,Euro,EUR
+62,FIM,Finnish Markka,FIM
+63,FJD,Fiji Dollar,FJD
+64,FKP,Falkland Islands Pound,FKP
+65,FRF,French Franc,FRF
+66,GBP,U.K. Pound,GBP
+67,GBX,ISO:GBX,GBX
+68,GEL,Georgian Lari,GEL
+69,GHC,Ghana Cedi,GHC
+70,GIP,Gibraltar Pound,GIP
+71,GMD,Gambian Dalasi,GMD
+72,GNF,Guinean Franc,GNF
+73,GRD,Greek Drachma,GRD
+74,GTQ,Guatemalan Quetzal,GTQ
+75,GWP,Guinea-Bissau Peso,GWP
+76,GYD,Guyanese Dollar,GYD
+77,HKD,Hong Kong Dollar,HKD
+78,HNL,Honduran Lempira,HNL
+79,HRK,Croatian Kuna,HRK
+80,HTG,Haitian Goude,HTG
+81,HUF,Hungarian Forint,HUF
+82,IDR,Indonesian Rupiah,IDR
+83,IEP,Irish Punt,IEP
+84,ILS,Israeli Shekel,ILS
+85,INR,Indian Rupee,INR
+86,IQD,Iraqi Dinar,IQD
+87,IRR,Iran Rial,IRR
+88,ISK,Icelandic Krona,ISK
+89,ITL,Italian Lira,ITL
+90,JMD,Jamaican Dollar,JMD
+91,JOD,Jordanian Dinar,JOD
+92,JPY,Japanese Yen,JPY
+93,KES,Kenya Shilling,KES
+94,KGS,Kyrgyzstan Som,KGS
+95,KHR,Cambodian Riel,KHR
+96,KMF,Comoros Franc,KMF
+97,KPW,North Korean Won,KPW
+98,KRW,South Korean Won,KRW
+99,KWD,Kuwait Dinar,KWD
+100,KYD,Cayman Islands Dollar,KYD
+101,KZT,Kazakhstan Tenge,KZT
+102,LAK,Laos New Kip,LAK
+103,LBP,Lebanese Pound,LBP
+104,LKR,Sri Lanka Rupee,LKR
+105,LRD,Liberian Dollar,LRD
+106,LSL,Lesotho Loti,LSL
+107,LTL,Lithuanian Litas,LTL
+108,LUF,Luxembourg Franc,LUF
+109,LVL,Latvian Lat,LVL
+110,LYD,Libyan Dinar,LYD
+111,MAD,Moroccan Dirham,MAD
+112,MDL,Moldovan Leu,MDL
+113,MGF,Malagsy Franc,MGF
+114,MKD,Macedonian Denar,MKD
+115,MMK,Myanmar (Burma) Kyat,MMK
+116,MNT,Mongolian Tugrik,MNT
+117,MOP,Macau Pataca,MOP
+118,MRO,Mauritanian Ougulya,MRO
+119,MTL,Maltese Lira,MTL
+120,MUR,Mauritian Rupee,MUR
+121,MVR,Maldive Islands Rufiya,MVR
+122,MWK,Malawi Kwacha,MWK
+123,MXN,Mexican Peso,MXN
+124,MYR,Malaysian Ringgit,MYR
+125,MZM,Mozambique Metical,MZM
+126,NAD,Namibian Dollar,NAD
+127,NGN,Nigerian Naira,NGN
+128,NIO,Nicaraguan Cordoba Oro,NIO
+129,NLG,Netherlands Guilder,NLG
+130,NOK,Norwegian Krone,NOK
+131,NPR,Nepalese Rupee,NPR
+132,NZD,New Zealand Dollar,NZD
+133,OMR,Omani Rial,OMR
+134,PAB,Panama Balboa,PAB
+135,PEN,Peruvian New Sol,PEN
+136,PGK,Papua & New Guinea Kina,PGK
+137,PHP,Philippines Peso,PHP
+138,PKR,Pakistan Rupee,PKR
+139,PLN,Polish Zloty,PLN
+140,PTE,Portuguese Escudo,PTE
+141,PYG,Paraguay Guarani,PYG
+142,QAR,Qatari Riyal,QAR
+143,ROL,Romanian Leu,ROL
+144,RUB,Russian Rouble,RUB
+145,RWF,Rwanda Franc,RWF
+146,SAR,Saudi Arabian Riyal,SAR
+147,SBD,Solomon Island Dollar,SBD
+148,SCR,Seychelles Rupee,SCR
+149,SDD,Sudanese Dinar,SDD
+150,SDG,Sudanese Pound,SDG
+151,SEK,Swedish Krona,SEK
+152,SGD,Singapore Dollar,SGD
+153,SHP,St. Helena Pound,SHP
+154,SIT,Slovenian Tolar,SIT
+155,SKK,Slovakian Koruna,SKK
+156,SLL,Sierra Leone Leone,SLL
+157,SOS,Somali Shilling,SOS
+158,SRD,Surinam Dollar,SRD
+159,SRG,Surinam Guilder,SRG
+160,STD,Sao Tome & Principe Dobra,STD
+161,SVC,El Salvador Colon,SVC
+162,SYP,Syrian Pound,SYP
+163,SZL,Swaziland Lilangeni,SZL
+164,THB,Thailand Baht,THB
+165,TMM,Turkmenistan Manet,TMM
+166,TND,Tunisian Dinar,TND
+167,TOP,Tonga Pa'Anga,TOP
+168,TPE,East Timor Escudo,TPE
+169,TRL,Old Turkish Lira,TRL
+170,TTD,Trinidad & Tobago Dollar,TTD
+171,TWD,Taiwan New Dollar,TWD
+172,TZS,Tanzania Shilling,TZS
+173,UAH,Ukraine Hryvna,UAH
+174,UGX,Uganda Shilling,UGX
+175,UYU,Uruguay Peso Uruguano,UYU
+176,UZS,Uzbekistan Sum,UZS
+177,VEB,Venezuelan Bolivar,VEB
+178,VND,Vietnamese Dong,VND
+179,VUV,Vanuatu Vatu,VUV
+180,WST,Western Samoa Tala,WST
+181,XAF,C.F.A. Franc,XAF
+182,XBA,European Composite Unit (EURCO),XBA
+183,XBB,European Monetary Unit,XBB
+184,XCD,East Caribbean Dollar,XCD
+185,XEU,European Currency Unit,XEU
+186,XOF,C.F.A. Franc (Bceao),XOF
+187,XPF,C.F.P. Franc,XPF
+188,YER,Yemeni Rial,YER
+189,YUM,Yugoslav New Dinar,YUM
+190,ZAR,South African Rand,ZAR
+191,ZMK,Zambian Kwacha,ZMK
+192,ZRN,Zaire New Zaire,ZRN
+193,ZWD,Zimbabwe Dollar,ZWD
+194,UDI,Mexican UDI,MXN
+195,TRY,Turkish Lira,TRY
+196,UVR COSTER,Colombian UVR,COP
+197,UI Curncy,Inflacion Uruguay - UYU / URUIURUI,UIC
+209,UVA,UVA,UVA
+211,IPCA,Brazilian Inflation Index,IPCA

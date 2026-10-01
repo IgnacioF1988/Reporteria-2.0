@@ -3,16 +3,17 @@
 Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es el cierre, p. ej. `20260731`.
 
 ## Una sola vez (instalación)
-1. Python 3.11+ instalado. En la carpeta del paquete: `pip install -e .[bbg,sql,facts,dev]` (sin terminal ni ODBC: `pip install -e .[facts,dev]`).
+1. Python 3.11+ instalado. En la carpeta del paquete: `pip install -e .[bbg,sql,facts,dev]` (sin terminal ni ODBC: `pip install -e .[facts,dev]`). Repetirlo tras cada `git pull` que cambie `pyproject.toml` (H8 agregó `duckdb`).
 2. Copiar `.env.example` a `.env` y completar `REPORTERIA_RAIZ`, `RUTA_CUBO_DIR`, `RUTA_BIX`, las credenciales `BEE_*` y `MONEDA_BI_PASSWORD` (clave de la base de Facts). **`.env` nunca se sube al repo.**
 3. Facts (facturas), una sola vez: generar la llave `ssh-keygen -t ed25519 -C "ignacio-bi-moneda"` (Enter a todo), mandar al proveedor SOLO el archivo `.pub` (`~/.ssh/id_ed25519.pub`; si la llave quedó en otra ruta, ponerla en `MONEDA_BI_SSH_KEY`). Cuando confirmen el acceso: `reporteria facts-probar` debe decir `Facts OK: N facturas, …`. Cada cierre no necesita nada más: la corrida baja las tablas y deja caché.
+3. Dimensionales (una sola vez por estación): el repo trae `v2/dim/dimensionales.duckdb`. Para rehacerlo desde el BIX con el `BD_BalanceSheet` completo: `reporteria dim importar --bix <RUTA_BIX> --reemplazar`, revisar el informe (filas leídas/generadas por fuente), `reporteria dim validar --fecha F`, borrar de `REGLAS/clasificacion` las filas con `Criterio=BalSheetKey` que el informe marca como reemplazadas, y `git add dim/` + commit + push. Si el duckdb está en otra ruta, `REPORTERIA_DIM` en `.env`.
 3. Estructura bajo la raíz: `01_INPUTS/MERCADO`, `01_INPUTS/MANUALES` (con `REGLAS.xlsx` y `EXCEPCIONES*.xlsx`), `01_INPUTS/GENEVA` (`bond_schedule.jsonl`). `02_OUTPUTS`, `03_LOGS` y `04_CACHE` se crean solos.
 4. Primera vez con manuales del legacy: `reporteria migrar-manuales --fecha F --legacy <carpeta legacy>` revisa el Excel `REGLAS_migracion_*.xlsx` que deja en MANUALES; si está bien, repetir con `--aplicar` (deja `REGLAS_backup_*.xlsx`). Usar `--incluir-defaulteados`: el `DEFAULTED.xlsx` corporativo está desactualizado (2019–2020) y la lista real de DEF/PROPDEF es el `DEFAULTEADOS.xlsx` del legacy; queda como una fila global por instrumento en `REGLAS/defaulteados`, que desde ahí se mantiene a mano (agregar el instrumento cuando entra en default, `Fecha_Fin` cuando sale).
 5. Opcional, para correr sin terminal un cierre que el legacy ya calculó: `reporteria importar-cache-legacy --fecha F --legacy <carpeta legacy>`.
 
 ## Cada cierre
 1. Dejar en MERCADO los archivos del mes: `JPM_CEMBI_GBI_F.xlsx`, `RA_TIR.xlsx`, `FACTURAS_F.xlsx`, `Carga_Indexes_F*.csv`, `Carga_CurvasSoberanas_F*.csv`, `4- Carga de paridades.xlsx`. Confirmar que `CUBO_F.xlsx` está en `RUTA_CUBO_DIR` y que BD_INSTRUMENTOS/HOMOL están al día.
-2. `reporteria check --fecha F` → todo `OK`. Mirar: `.env` con 6/6 variables, `xbbg`/`pyodbc`/`psycopg2` instalados, línea `Facts (facturas)` en OK, antigüedad del `bond_schedule.jsonl` (≤ 35 días), sin manuales legacy pendientes. Exit 2 = falta algo obligatorio o REGLAS inválido: corregir antes de seguir.
+2. `reporteria check --fecha F` → todo `OK`. Mirar: línea `dimensionales dimensionales.duckdb` con `dim validar: sin problemas` (si dice `espejo dim/csv desactualizado`, alguien editó el duckdb sin pasar por `dim importar`), `.env` con 6/6 variables, `xbbg`/`pyodbc`/`psycopg2` instalados, línea `Facts (facturas)` en OK, antigüedad del `bond_schedule.jsonl` (≤ 35 días), sin manuales legacy pendientes. Exit 2 = falta algo obligatorio o REGLAS inválido: corregir antes de seguir.
 3. **Con terminal abierta**: `reporteria correr --fecha F`. Deja `02_OUTPUTS/F/REPORTE_F.xlsx`, `resumen_corrida_F.json`, el log en `03_LOGS/F/` y la caché Bloomberg/FX en `04_CACHE/F/`. Exit 1 = hay alertas CRÍTICAS (la corrida es válida; hay que revisarlas).
 4. Copiar el reporte como respaldo: `copy 02_OUTPUTS\F\REPORTE_F.xlsx 02_OUTPUTS\F\REPORTE_F_terminal.xlsx`.
 5. **Reproducibilidad**: `reporteria correr --fecha F --sin-bbg --sin-sql --sin-facts` y luego `reporteria comparar --fecha F --otro 02_OUTPUTS\F\REPORTE_F_terminal.xlsx`. Debe decir `0 diferencias` (exit 0). Si no, la caché está incompleta: revisar el log.
@@ -23,8 +24,9 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
    - `agregados`: AW/DW por fondo a nivel ACTIVOS / PASIVOS / PATRIMONIO; `Cobertura` de activos por fondo.
    - `conversiones`: breakeven y XCCY/drop aplicados; `XCCY_VS_DROP` en alertas marca los swaps que difieren del drop propio.
    - `reglas_aplicadas` e `insumos`: qué fila de REGLAS actuó y qué archivos se usaron.
-7. Overrides de atributo (hedge distinto, índice, bucket por fondo): `REGLAS/overrides_atributo` con `Field` ∈ Hedge_Currency, Indice, Bucket, Risk_Currency, Risk_Country y vigencia. Correr de nuevo `--sin-bbg`.
-8. Cerrar: el reporte final es el último `REPORTE_F.xlsx`. El cierre siguiente lo usa como cierre anterior (hedge heredado y alertas temporales A05–A07).
+7. Clasificaciones nuevas (hoja `plantilla_dim`: combinaciones de códigos sin Bucket / Ficha_FI / FX_Exposure): `reporteria dim exportar`, pegar las filas de la plantilla en la hoja `dim_clasificacion` del Excel (dejar vacías las columnas que no importan; `ID_Fund` solo si es propio de un fondo), `reporteria dim importar --excel <archivo>`, `git add dim/` + commit. Volver a correr `--sin-bbg`.
+8. Overrides de atributo (hedge distinto, índice, bucket por fondo): `REGLAS/overrides_atributo` con `Field` ∈ Hedge_Currency, Indice, Bucket, Risk_Currency, Risk_Country y vigencia. Correr de nuevo `--sin-bbg`.
+9. Cerrar: el reporte final es el último `REPORTE_F.xlsx`. El cierre siguiente lo usa como cierre anterior (hedge heredado y alertas temporales A05–A07).
 
 ## Versiones
 - `xbbg` 0.7 y ≥ 1.0 funcionan (el adaptador detecta la versión). La 1.x necesita `pyarrow>=22` (viene en el extra `bbg`); si aparece `Backend 'pyarrow' requires pyarrow >= 22`, correr `py -3.12 -m pip install --user --upgrade "pyarrow>=22"`.

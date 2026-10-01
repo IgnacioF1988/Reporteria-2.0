@@ -6,3 +6,7 @@ __pycache__/
 03_LOGS/
 04_CACHE/
 ~$*
+*.duckdb.wal
+tests/fixtures/**/dimensionales.duckdb
+tests/fixtures/**/csv/
+dim/DIM_*.xlsx

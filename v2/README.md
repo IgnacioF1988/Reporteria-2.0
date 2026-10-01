@@ -18,7 +18,7 @@ Diagramas de arquitectura, flujo por posición y ciclo del operador: [`docs/Repo
 
 ## Instalación (Windows del operador)
 ```
-pip install -e .[bbg,sql]      # xbbg y pyodbc solo donde hay terminal y driver SQL
+pip install -e .[bbg,sql]      # xbbg y pyodbc solo donde hay terminal y driver SQL (duckdb viene en las dependencias base)
 copy .env.example .env         # completar rutas y credenciales
 ```
 
@@ -31,6 +31,9 @@ reporteria importar-cache-legacy --fecha 20260731 --legacy ..   # siembra la cac
 reporteria migrar-manuales --fecha 20260731 --legacy .. [--aplicar] [--incluir-defaulteados]   # FIP, Atributos_*, OVERRIDES → REGLAS
 reporteria comparar --fecha 20260731 --otro 02_OUTPUTS/20260731/REPORTE_20260731_terminal.xlsx  # terminal vs --sin-bbg
 reporteria facts-probar                                          # túnel SSH a Facts: cuenta filas de las tres tablas
+reporteria dim importar --bix <RUTA_BIX> [--reemplazar]          # dimensionales: migra BD_BalanceSheet / FX / catálogos a dim/dimensionales.duckdb
+reporteria dim exportar | dim importar --excel DIM.xlsx          # ciclo de edición (valida antes de escribir)
+reporteria dim validar --fecha 20260731 | dim probar --fecha 20260731   # consistencia; clasificación del CUBO con las dimensionales
 ```
 El paso a paso del operador está en [`CHECKLIST_CIERRE.md`](CHECKLIST_CIERRE.md).
 Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input obligatorio o REGLAS inválido.
@@ -74,21 +77,52 @@ en `candidatos` con su motivo. Las posiciones hedgeadas (`Hedge_Currency` por fo
 02_OUTPUTS/{FECHA}/   REPORTE_{FECHA}.xlsx, resumen_corrida_{FECHA}.json
 03_LOGS/{FECHA}/      corrida_*.log
 04_CACHE/{FECHA}/     respuestas de Bloomberg y FX (permite --sin-bbg)
+v2/dim/               dimensionales.duckdb (versionado en git) + csv/ espejo legible para el diff
 ```
-CUBO, BD_INSTRUMENTOS, BD_FUNDS y HOMOL se leen donde están (`RUTA_CUBO_DIR`, `RUTA_BIX`).
+CUBO, BD_INSTRUMENTOS, HOMOL y DEFAULTED se leen donde están (`RUTA_CUBO_DIR`, `RUTA_BIX`). Las dimensionales
+(clasificación, fondos, monedas, catálogos) viven en el repo: ver §Dimensionales.
 
 ## Clasificación (taxonomía corporativa)
-`BalSheetKey` = `BalanceSheet` + los 8 códigos del maestro concatenados sin relleno (Investment, Issuer, Issue, Coupon,
-Rank, Cash, Bank_Debt, Fund) → `BD_BalanceSheet` → **Bucket** (`Investment_Type_CarteraFI`, 15 valores) y `Ficha_FI`.
-Las tablas `BD_FX_Exposure_{FONDO}.xlsx` agregan `FX_Exposure` para los fondos que la tengan. Lo que no mapea queda en
-`SIN_REGLA` con alerta, nunca desaparece.
+Cada posición recibe **Bucket** (15 valores), **Ficha_FI** y **FX_Exposure** desde `dim_clasificacion` (ver §Dimensionales):
+filas con comodines sobre `BalanceSheet` + los 8 códigos del maestro (Investment, Issuer, Issue, Coupon, Rank, Cash,
+Bank_Debt, Fund) + `Emision_nacional`. Por atributo gana la fila más específica; una fila con `ID_Fund` (taxonomía propia
+del fondo) gana siempre a la genérica. `BalSheetKey` (los 9 campos concatenados) sigue en `cartera_final` solo para auditar.
+Lo que ninguna fila define queda en `SIN_REGLA` (Bucket) o vacío (Ficha_FI / FX_Exposure) con alerta y sale en la hoja
+`plantilla_dim` del reporte, listo para pegar como fila nueva. Encima actúan `REGLAS/clasificacion` (por instrumento o
+regex) y `REGLAS/overrides_atributo` (`Field=Bucket`).
+
+## Dimensionales (`v2/dim/dimensionales.duckdb`)
+Un solo archivo DuckDB **versionado en git** es la fuente de verdad; reemplaza a `BD_BalanceSheet`, las
+`BD_FX_Exposure_{FONDO}.xlsx`, `BD_FUNDS`, `BD_Monedas`, `BD_YLD_FLAG` y los `BD_*_TYPE` del BIX en la corrida. Tablas:
+`dim_clasificacion`, `dim_fondos`, `dim_monedas`, `dim_yld_flag`, `dim_investment_type` … `dim_fund_type` (catálogos) y
+`dim_meta` (fecha de importación). El espejo `dim/csv/*.csv` se regenera en cada escritura para que el `git diff` sea legible.
+
+`dim_clasificacion`: `ID | ID_Fund | BalanceSheet | Investment_Type_Code … Fund_Type_Code | Emision_nacional | Bucket | Ficha_FI |
+FX_Exposure | Comentario | Origen_Migracion | Vigente_Desde | Vigente_Hasta`. Vacío en una columna de llave = cualquiera;
+vacío en un atributo = la fila no lo define. Resolución por atributo: candidatas = filas cuyas columnas fijas coinciden; gana la
+de más columnas fijas (+100 si `ID_Fund` está fijo); empate con valores distintos → menor `ID` + alerta `DIM_AMBIGUA`.
+
+Cómo se usa:
+- **Clasificación nueva** = normalmente **una fila** con los códigos mínimos que la determinan (lo demás vacío) y los atributos
+  que cambian. Ej.: pactos → `BalanceSheet=Asset, Investment_Type_Code=1, Issue_Type_Code=7, Bucket=Repo`.
+- **Fondo con taxonomía propia** = filas con su `ID_Fund` solo donde difiere; hereda todo lo demás (MRCLP: 3 filas de Bucket
+  y 13 de FX_Exposure en lugar de una columna extra y un archivo por fondo).
+- **Por instrumento**: `REGLAS/clasificacion` (`PK2`, `ID_Instrumento`, `Nombre_Regex`) y `overrides_atributo`. El criterio
+  `BalSheetKey` está deprecado: `dim validar --fecha F` lista esas filas para moverlas a `dim_clasificacion` con `ID_Fund`.
+- **Ciclo de edición**: `reporteria dim exportar` (Excel con una hoja por tabla) → editar → `reporteria dim importar --excel
+  DIM.xlsx` (valida: códigos en catálogos, fondos, filas sin atributo, solapes ambiguos; exit 2 y no escribe si hay errores) →
+  `git add dim/ && git commit`. `dim probar --fecha F` clasifica el CUBO con las dimensionales y lista las combinaciones sin fila.
+- **Primera vez / rehacer desde el BIX**: `reporteria dim importar --bix <RUTA_BIX> [--reemplazar]` compacta BD_BalanceSheet
+  (146 llaves → 24 filas de Bucket y 18 de Ficha_FI), la variante `_MRCLP` (3 filas con `ID_Fund=20`), las FX (MLDL como
+  genérica para todos los fondos; MRCLP con `ID_Fund=20` y `Emision_nacional`) y copia los catálogos. La compactación es
+  lossless sobre las llaves presentes (test de equivalencia) y nunca deja dos filas que puedan empatar.
 
 ## REGLAS.xlsx (`01_INPUTS/MANUALES/`) — `ID_Fund` vacío = todos los fondos
 | Hoja | Para qué |
 |---|---|
 | `fondos` | `ID_Fund, Politica_Hedge` (`A_CLP`, `POR_PAIS` o vacío). |
 | `buckets` | `Bucket, Tratamiento, Orden`: qué se hace con cada bucket. Tratamiento: `CASCADA` busca métrica en proveedores; `CAJA` índice + spread; `FACTURA` RPT de Facts; `CERO` yield 0; `EXCLUIR`. |
-| `clasificacion` | Excepciones a la tabla corporativa: `ID, ID_Fund, Criterio (PK2 / ID_Instrumento / BalSheetKey / Nombre_Regex / Issue_Type_Code / Investment_Type_Code), Valor, Bucket y/o Tratamiento`. Regla por fondo gana a global; criterio más específico gana. Ej.: en MRCLP los depósitos son caja; `Issue_Type_Code = 5` → `FACTURA`. |
+| `clasificacion` | Excepciones por instrumento a las dimensionales: `ID, ID_Fund, Criterio (PK2 / ID_Instrumento / Nombre_Regex / Issue_Type_Code / Investment_Type_Code; BalSheetKey deprecado → dim_clasificacion), Valor, Bucket y/o Tratamiento`. Regla por fondo gana a global; criterio más específico gana. Ej.: `Issue_Type_Code = 5` → `FACTURA`; FIP con Treatment Equity por PK2. |
 | `cajas` | `ID_Fund, PK2, Indice_Referencia (ticker BBG o N.A.), Spread_Anual (decimal), Dias`. Yield = nivel del índice al cierre + spread; Duration = Dias/365. Sin fila → yield 0 + alerta `CAJA_SIN_REGLA` (solo si ninguna otra fuente, p. ej. RA para un DAP, la resolvió); la hoja `plantilla_cajas` del reporte trae esas posiciones en este formato con una sugerencia trazable (`COPIA_PK2`: mismo PK2 con fila en otro fondo; `NOMBRE`: tasa y vencimiento en el nombre `CR_CLP_SCOTIA_20260909_0.4800`; `POR_MONEDA`: índice y spread más usados para esa moneda) para revisar y pegar. Migrado de `Template_Cajas`. |
 | `defaulteados` | `ID_Fund (vacío = todos los fondos), ID_Instrumento, Estado (DEF / PROPDEF), Fecha_Desde, Fecha_Fin`. Se suma al `DEFAULTED.xlsx` corporativo (que está desactualizado: 2019–2020). Ambos → `yield_def` (0) y `duracion_def` (0.5) de `parametros`, pisan cualquier proveedor y no gastan terminal. `migrar-manuales --incluir-defaulteados` trae el `DEFAULTEADOS.xlsx` del legacy como una fila global por instrumento (así lo aplicaba el legacy). |
 | `overrides_valor` | `ID_Fund, ID_Instrumento, SubID_Instrumento, Yield, Duration, Fecha_Desde, Fecha_Fin`. Pisa todo. |
@@ -124,7 +158,8 @@ La corrida verifica `MV_PAT = MV_ACT − MV_PAS` y que los pesos sumen 1 (alerta
 ## Excel del cierre (`REPORTE_{FECHA}.xlsx`)
 `resumen` · `agregados` · `alertas_resumen` (una fila por regla con Estado y MV afectado) · `alertas` · `faltantes` ·
 `plantilla_overrides` (los faltantes ya en el formato de `REGLAS/overrides_valor`: completar Yield/Duration y pegar) ·
-`cartera_final` · `candidatos` · `conversiones` · `curvas_drop` · `td_detalle` · `reglas_aplicadas` (qué fila de REGLAS actuó y
+`plantilla_cajas` · `plantilla_dim` (combinaciones de códigos sin Bucket / Ficha_FI / FX_Exposure en el formato de
+`dim_clasificacion`, con MV, fondos y un ejemplo) · `cartera_final` · `candidatos` · `conversiones` · `curvas_drop` · `td_detalle` · `reglas_aplicadas` (qué fila de REGLAS actuó y
 sobre cuántas posiciones) · `insumos`. Más `resumen_corrida_{FECHA}.json`.
 
 ## Facturas

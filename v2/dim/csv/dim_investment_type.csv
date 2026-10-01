@@ -1,0 +1,9 @@
+Investment_Type_Code,Investment_Type,Orden_Cartera,Inv_Type_Short_Exp,Inv_Type_Short_Bal
+0,No Aplica,0,,
+1,Fixed Income,1,Fixed Income,Fixed Income
+2,Equity,2,Equity,Equity
+3,Cash,4,Cash,Cash
+4,Payable/Receivable,6,Pay. / Rec.,Pay. / Rec.
+5,Bank Debt,5,Bank Debt,Bank Debt
+6,Fund,3,Fund,Fund
+7,Derivative,7,Deriv.,MTM

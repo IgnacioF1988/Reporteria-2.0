@@ -8,6 +8,8 @@ import typer
 from .config import Rutas
 
 app = typer.Typer(add_completion=False, help="Yield y Duration por posición — cierre mensual")
+dim_app = typer.Typer(add_completion=False, help="Dimensionales locales (dimensionales.duckdb): importar, exportar, validar, probar")
+app.add_typer(dim_app, name="dim")
 
 
 @app.command()
@@ -34,9 +36,32 @@ def check(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | N
             faltan += 1
             typer.echo(f"  [ERR] REGLAS.xlsx: {e}")
     typer.echo(f"  cierre anterior detectado: {r.fecha_ant or '(ninguno)'}")
+    for linea in _estado_dim(r):
+        typer.echo(f"  {linea}")
     for linea in _estado_entorno(r):
         typer.echo(f"  {linea}")
     raise typer.Exit(2 if faltan else 0)
+
+
+def _estado_dim(r: Rutas) -> list[str]:
+    """Dimensionales: existe el duckdb, filas por tabla, fecha de importación, validación, espejo CSV al día."""
+    from .adaptadores import dim as DIM
+    from .dim import validar
+    if not Path(r.dim).exists():
+        return [f"[FALTA] dimensionales {r.dim} → reporteria dim importar --bix <carpeta BIX> (ver CHECKLIST)"]
+    try:
+        d = DIM.leer(r.dim)
+    except Exception as e:                      # noqa: BLE001 — diagnóstico
+        return [f"[ERR] dimensionales {r.dim}: {e}"]
+    nf = int(d.clasificacion["ID_Fund"].notna().sum())
+    prob = validar(d.clasificacion, d.catalogos, fondos=set(d.bd_funds()["ID_Fund"]) if len(d.fondos) else None)
+    csv_ok = DIM.csv_al_dia(Path(r.dim).parent / "csv", d)
+    out = [f"[OK ] dimensionales {Path(r.dim).name}: clasificacion={len(d.clasificacion)} ({len(d.clasificacion) - nf} genéricas, {nf} por fondo) "
+           f"fondos={len(d.fondos)} monedas={len(d.monedas)} catálogos={len(d.catalogos)} yld_flag={len(d.yld_flag)}; importado {d.meta.get('importado', '?')}"]
+    out.append(f"[{'OK ' if prob.empty else 'ERR'}] dim validar: {'sin problemas' if prob.empty else str(len(prob)) + ' problemas → reporteria dim validar'}")
+    if not csv_ok:
+        out.append("[AVISO] espejo dim/csv desactualizado → reporteria dim importar --excel <archivo> o dim exportar/importar")
+    return out
 
 
 def _estado_facts(r: Rutas) -> list[str]:
@@ -148,8 +173,10 @@ def migrar_manuales_cmd(fecha: str = typer.Option(..., help="Cierre YYYYMMDD (pa
     import pandas as pd
     from .legado import _fondos_alias, fusionar_reglas, migrar_manuales
     from .lectura.maestros import leer_bd_instrumentos
+    from .adaptadores import dim as DIM
     r = Rutas.desde_env(fecha, raiz)
-    alias = _fondos_alias(r.bd_funds, r.homol_funds if Path(r.homol_funds).exists() else None)
+    fondos = DIM.leer(r.dim).fondos if Path(r.dim).exists() else r.bd_funds
+    alias = _fondos_alias(fondos, r.homol_funds if Path(r.homol_funds).exists() else None)
     ids = set(leer_bd_instrumentos(r.bd_instr)["ID_Instrumento"]) if Path(r.bd_instr).exists() else None
     nuevas, informe = migrar_manuales(legacy, alias, ids, incluir_defaulteados, template_cajas)
     for _, f in informe.iterrows():
@@ -188,6 +215,115 @@ def comparar(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"),
         typer.echo(dif.groupby("Campo").size().to_string())
     raise typer.Exit(1 if len(dif) else 0)
 
+
+
+# ── dim: dimensionales locales ───────────────────────────────────────────────────────────────────────────────────────
+def _ruta_dim(dim: Path | None, raiz: Path | None) -> Path:
+    return Path(dim) if dim else Rutas.desde_env("00000000", raiz).dim
+
+
+@dim_app.command("importar")
+def dim_importar(bix: Path | None = typer.Option(None, help="Carpeta BIX con BD_BalanceSheet, BD_FX_Exposure_*, BD_FUNDS, BD_Monedas, BD_*_TYPE (migración)"),
+                 excel: Path | None = typer.Option(None, help="Excel exportado con `dim exportar` y editado (ciclo de edición)"),
+                 dim: Path | None = typer.Option(None, help="Ruta del duckdb (default: REPORTERIA_DIM o v2/dim/dimensionales.duckdb)"),
+                 reemplazar: bool = typer.Option(False, "--reemplazar", help="Con --bix: sobrescribir un duckdb existente"),
+                 raiz: Path | None = None):
+    """Crea o actualiza dimensionales.duckdb: desde el BIX (una vez, compactando) o desde un Excel editado (valida antes de escribir)."""
+    from .adaptadores import dim as DIM
+    from .dim import validar
+    from .legado import migrar_dimensionales
+    destino = _ruta_dim(dim, raiz)
+    if (bix is None) == (excel is None):
+        typer.echo("indique --bix <carpeta> (migración) o --excel <archivo> (edición), no ambos")
+        raise typer.Exit(2)
+    if bix is not None:
+        if destino.exists() and not reemplazar:
+            typer.echo(f"{destino} ya existe: use --excel para editarlo o --reemplazar para volver a migrar desde el BIX")
+            raise typer.Exit(2)
+        dirs = [Path(bix)] + ([Path(bix) / "DIMENSIONALES"] if (Path(bix) / "DIMENSIONALES").is_dir() else [])
+        dims, informe = migrar_dimensionales(dirs)
+        for _, f in informe.iterrows():
+            typer.echo(f"  {f['Fuente']:48} leídas {f['Filas_leidas']:>4}  generadas {f['Filas_generadas']:>4}  {f['Avisos']}")
+    else:
+        dims = DIM.importar_excel(excel)
+        import datetime as dt
+        dims.meta = {**dims.meta, "importado": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "origen": str(excel)}
+    prob = validar(dims.clasificacion, dims.catalogos, fondos=set(dims.bd_funds()["ID_Fund"]) if len(dims.fondos) else None)
+    if not prob.empty:
+        for _, f in prob.iterrows():
+            typer.echo(f"  [ERR] {f['Tabla']} ID {f['ID']}: {f['Problema']}")
+        typer.echo("no se escribió nada: corrija y vuelva a importar")
+        raise typer.Exit(2)
+    DIM.escribir(destino, dims)
+    typer.echo(f"dimensionales escritas en {destino} ({dims.resumen()}); espejo CSV en {destino.parent / 'csv'} → git add dim/ && git commit")
+
+
+@dim_app.command("exportar")
+def dim_exportar(salida: Path | None = typer.Option(None, help="Excel de salida (default: dim/DIM_{ts}.xlsx junto al duckdb)"),
+                 dim: Path | None = typer.Option(None), raiz: Path | None = None):
+    """Exporta todas las tablas a un Excel (una hoja por tabla) para editarlas y volver con `dim importar --excel`."""
+    import datetime as dt
+    from .adaptadores import dim as DIM
+    origen = _ruta_dim(dim, raiz)
+    d = DIM.leer(origen)
+    destino = Path(salida) if salida else origen.parent / f"DIM_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    DIM.exportar_excel(d, destino)
+    typer.echo(f"exportado a {destino} ({d.resumen()})")
+
+
+@dim_app.command("validar")
+def dim_validar(fecha: str | None = typer.Option(None, help="Cierre YYYYMMDD para cruzar con REGLAS/buckets (opcional)"),
+                dim: Path | None = typer.Option(None), raiz: Path | None = None):
+    """Valida dim_clasificacion: códigos en catálogos, fondos, solapes ambiguos; con --fecha, Buckets contra REGLAS/buckets y REGLAS BalSheetKey deprecadas."""
+    from .adaptadores import dim as DIM
+    from .dim import validar
+    ruta = _ruta_dim(dim, raiz)
+    d = DIM.leer(ruta)
+    buckets = None
+    if fecha:
+        from .lectura.reglas import leer_reglas
+        r = Rutas.desde_env(fecha, raiz)
+        if Path(r.reglas).exists():
+            rg = leer_reglas(r.reglas)
+            buckets = set(rg.buckets["Bucket"])
+            dep = rg.clasificacion[rg.clasificacion["Criterio"].eq("BalSheetKey")]
+            for _, f in dep.iterrows():
+                typer.echo(f"  [AVISO] REGLAS/clasificacion ID {f['ID']} (Criterio=BalSheetKey {f['Valor']} fondo {f['ID_Fund']}) está deprecada: "
+                           f"muévala a dim_clasificacion con ID_Fund y bórrela de REGLAS")
+    prob = validar(d.clasificacion, d.catalogos, buckets, set(d.bd_funds()["ID_Fund"]) if len(d.fondos) else None)
+    for _, f in prob.iterrows():
+        typer.echo(f"  [ERR] {f['Tabla']} ID {f['ID']}: {f['Problema']}")
+    typer.echo(f"dim validar: {'sin problemas' if prob.empty else str(len(prob)) + ' problemas'} ({ruta})")
+    raise typer.Exit(2 if len(prob) else 0)
+
+
+@dim_app.command("probar")
+def dim_probar(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), dim: Path | None = typer.Option(None), raiz: Path | None = None):
+    """Clasifica el CUBO de la fecha con las dimensionales y muestra conteos por Bucket / Ficha_FI / FX_Exposure y combinaciones sin fila."""
+    import pandas as pd
+    from . import clasificacion, dim as D, universo
+    from .adaptadores import dim as DIM
+    from .lectura import maestros as M
+    from .lectura.cubo import leer_cubo
+    from .lectura.reglas import leer_reglas
+    r = Rutas.desde_env(fecha, raiz)
+    d = DIM.leer(_ruta_dim(dim, raiz))
+    cubo = leer_cubo(r.cubo)
+    reglas = leer_reglas(r.reglas, set(d.bd_funds()["ID_Fund"]) | set(cubo["ID_Fund"]))
+    pos, _ = universo.armar_universo(cubo, M.leer_bd_instrumentos(r.bd_instr), d.bd_funds(), d.bd_monedas())
+    pos, al = clasificacion.clasificar(pos, d.clasificacion, reglas.buckets, reglas.clasificacion, r.settle)
+    mv = pd.to_numeric(pos["TotalMVal"], errors="coerce").abs()
+    for col in ("Bucket", "Ficha_FI", "FX_Exposure"):
+        typer.echo(f"\n{col}:")
+        t = pos.assign(_mv=mv).groupby(pos[col].replace("", "(vacío)")).agg(n=("Pos_ID", "size"), mv=("_mv", "sum")).sort_values("mv", ascending=False)
+        for k, f in t.iterrows():
+            typer.echo(f"  {k:36} {int(f['n']):>6} posiciones  {f['mv']:>18,.0f}")
+    plantilla = D.plantilla_sin_dim(pos)
+    typer.echo(f"\ncombinaciones sin fila (Bucket SIN_REGLA / Ficha_FI o FX_Exposure vacíos): {len(plantilla)}")
+    for _, f in plantilla.head(15).iterrows():
+        typer.echo(f"  {f['BalanceSheet']}|{'|'.join(str(f[c]) for c in D.COLS_LLAVE[1:])}  falta {f['_Falta']:28} {int(f['_N_Posiciones']):>5} pos  {f['_TotalMVal']:>16,.0f}  ej. {f['_Ejemplo']}")
+    if len(al):
+        typer.echo(f"alertas: {al.groupby('Nombre').size().to_dict()}")
 
 if __name__ == "__main__":
     app()

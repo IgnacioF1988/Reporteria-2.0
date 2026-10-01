@@ -13,7 +13,7 @@ NAVY = "1F3864"
 COLS_CARTERA = ["Pos_ID", "ID_Fund", "Fondo", "PK2", "BalanceSheet", "Name_Instrumento", "ISIN", "Risk_Country",
                 "Risk_Currency", "Moneda_PK2", "Investment_Type_Code", "Issue_Type_Code", "Coupon_Type_Code",
                 "Base_Name", "Familia", "ISIN_Hermanos", "Hedge_Currency", "Hedge_Origen", "Indice", "Overrides",
-                "BalSheetKey", "Bucket", "Bucket_Origen", "Bucket_Orden", "Ficha_FI", "FX_Exposure", "Tratamiento",
+                "BalSheetKey", "Bucket", "Bucket_Origen", "Bucket_Orden", "Ficha_FI", "Ficha_Origen", "FX_Exposure", "FX_Origen", "Tratamiento",
                 "Yield", "Duration", "Yield_Moneda", "Conversion", "Yield_Papel", "Duration_Papel", "Yield_XCCY", "Yield_Drop",
                 "Dif_XCCY_Drop_bps", "Indice_Origen", "Extrapolado", "Fuente", "Origen", "Etapa", "Estado", "Estado_DEF", "CalcType",
                 "CalcType_exportable", "Motivo", "TotalMVal", "MVBook", "AI", "LocalPrice", "Qty", "Factor"]

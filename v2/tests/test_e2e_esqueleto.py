@@ -39,8 +39,9 @@ def test_corrida_muestra(rutas, bbg, fx):
     assert _fila(pos, "176727-1", 16, "Liability")["Bucket"] == "Financial Debt"
     assert (pos["Ficha_FI"] != "").sum() > 600
     mrclp = pos[(pos["ID_Fund"] == 20) & (pos["Bucket"] != "SIN_REGLA")]
-    assert (mrclp["FX_Exposure"] != "").all()                                              # MRCLP tiene tabla FX
-    assert (pos.loc[pos["ID_Fund"] == 13, "FX_Exposure"] == "").all()                      # MDLAT no
+    assert (mrclp["FX_Exposure"] != "").all()                                              # MRCLP tiene filas FX propias (ID_Fund=20)
+    assert (pos.loc[pos["ID_Fund"] == 13, "FX_Exposure"] != "").mean() > 0.9               # MDLAT recibe las genéricas (H8)
+    assert pos["FX_Origen"].str.startswith("DIM:").mean() > 0.9
 
     # Familias REGS/144A inferidas por nombre y hedge por política del fondo (MRCLP = A_CLP)
     fam = pos[pos["ISIN_Hermanos"] != ""]

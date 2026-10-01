@@ -1,0 +1,76 @@
+ID_Fund,FundShortName,FundName,FundBaseCurrency,id_CURR,NombreTupungato,Estrategia_Cons_Fondo,Estrategia_Comparador,BM1,BM2,Activo_MantenedorFondos
+1,ALTURAS,Alturas,USD,1,ALTURAS,Latam FI USD,,,,0
+2,ALTURAS II,Alturas II,USD,1,ALTURAS II,Latam FI USD,Latam FI USD,,,1
+3,MRFA FCI,Moneda Renta Fija Argentina FCI,ARS,11,MRFA FCI,,,,,0
+4,MRFDL FCI,Moneda Renta Fija Dólar Latam FCI,USD,1,MRFDL FCI,,,,,0
+5,MRVA FCI,Moneda Renta Variable Argentina FCI,ARS,11,MRVA FCI,,,,,0
+6,CAMPION,Campion,CLP,39,CAMPION,Other,,,,0
+7,CHILETECH,Chiletech,CLP,39,CHILETECH,Private Equity,,,,0
+8,GLORY,Glory,USD,1,GLORY,Latam Equities,,MSCI Latam Gross,GDUEEGFL,1
+9,LV PERU,LV Peru,USD,1,LVPE,Latam FI USD,,,,0
+10,MCF,Moneda Chile Fund,USD,1,MCF,Chilean Equities,,,,0
+11,MDCH,Moneda Deuda Chile,CLP,39,MDCHILE,Chilean FI,,,,1
+12,MDELA,Moneda Latin American Equities Fund (Delaware),USD,1,MDELA,Latam Equities,,MSCI Latam IMI Net TR Ex BR,M1LA7IMR,1
+13,MDLAT,Moneda Deuda Latinoamericana,USD,1,MDLAT,Latam FI USD,Latam FI USD,,,1
+14,MDLIG,Moneda Deuda Latam IG (Feeder),USD,1,MDLIG,,,,,1
+15,MERCER,Mercer,EUR,61,MERCER FUND,Latam Equities,,MSCI Latam IMI Net TR,M1LAIM,1
+16,MLCD,Moneda Latin American Corporate Debt,USD,1,MLCD,Latam FI USD,Latam FI USD,,,1
+17,MLDL,Moneda Latinoamérica Deuda Local,USD,1,MLDL,Latam FI LC,,,,1
+18,MLEQ,Moneda Latam Equity (Feeder),USD,1,MLEQ,,,,,1
+19,MRV,Moneda Renta Variable,CLP,39,MONEDA RV,Chilean Equities,Chilean Equities LC,Indice de Precios Selectivo de Acciones,SPCLXIPSA,1
+20,MRCLP,Moneda Renta CLP,CLP,39,MRentaCLP,Chilean FI,,,,1
+21,MRFA,Moneda Renta Fija Argentina (Feeder),USD,1,MRFA,,,,,0
+22,MRFIHY,Moneda Renta Fija Internacional HY,USD,1,MRFIHY,Internacionales,,,,0
+23,MRFIIG,Moneda Renta Fija Internacional IG,USD,1,MRFIIG,Internacionales,,,,1
+24,MRVA,Moneda Renta Variable Argentina (Feeder),USD,1,MRVA,,,,,0
+25,MRVE,Moneda Renta Variable Emergente,USD,1,MRVE FI,Internacionales,,,,1
+26,MRVI,Moneda Renta Variable Internacional,USD,1,MRVI,Internacionales,,,,1
+27,MRVUSA,Moneda Renta Variable USA,USD,1,MRVUSA,Internacionales,,,,0
+28,MSC,Moneda Small Cap,USD,1,MSC,,,MSCI Latam IMI Net TR,M1LAIM,1
+30,MULINA,Mulina,USD,1,MULINA,,,,,0
+31,ORANGE,Orange,CLP,39,ORANGE,Chilean Equities,Chilean Equities LC,FTSE Chile All Cap TR Gross Orange,4NORG175,1
+32,PATAGONIA,Patagonia,USD,1,PATAGONIA,,,,,0
+33,PIONERO,Pionero,CLP,39,PIONERO,Chilean Equities,Chilean Equities SM Cap,IGPA Small Cap,SPCLXIGPAS,1
+34,MLE (LX),Moneda Latin America Equities (LX),USD,1,SMULEF,Latam Equities,,MSCI Latam 10/40,MN40LAU,1
+35,ALPINVEST II,Alpinvest II,USD,1,ALPINVEST II,,,,,1
+36,CARLYLE I,Carlyle I,USD,1,CARLYLE I,,,,,1
+37,CARLYLE II,Carlyle II,EUR,61,CARLYLE II,,,,,1
+38,CARLYLE III,Carlyle III,USD,1,CARLYLE III,,,,,1
+39,CARLYLE IV,Carlyle IV,USD,1,CARLYLE IV,,,,,1
+40,CARLYLE IX,Carlyle IX,USD,1,CARLYLE IX,,,,,1
+41,CARLYLE V,Carlyle V,USD,1,CARLYLE V,,,,,0
+42,CARLYLE VII,Carlyle VII,USD,1,CARLYLE VII,,,,,1
+43,CARLYLE VIII,Carlyle VIII,USD,1,CARLYLE VIII,,,,,1
+44,CARLYLE X,Carlyle X,EUR,61,CARLYLE X,,,,,1
+45,CARLYLE XI MONEDA,Carlyle XI MONEDA,USD,1,CARLYLE XI MONEDA,,,,,1
+46,MAGF II,MAGF II,CLP,39,MAGF II,,,,,0
+47,CARLYLE XII,Carlyle XII,USD,1,CARLYLE XII,,,,,1
+48,MSLALCD,MLDL Feeder LX,USD,1,MSLALCD,,,,,1
+49,Latam DIP LLC,Latam DIP LLC,USD,1,Latam DIP LLC,,,,,0
+50,CARLYLE XIII,CARLYLE XIII,USD,1,CARLYLE XIII,,,,,1
+51,MONEDA GSI,MONEDA GSI,CLP,39,MONEDA GSI,,,,,1
+52,MSCLUX,Moneda Latin America Small Cap (LX),USD,1,MSCLUX,Latam Equities,,MSCI Latam Small Cap Net,MSLUELAN,1
+53,CARLYLE XIV,CARLYLE XIV,USD,1,CARLYLE XIV,,,,,1
+54,Moneda GSI RER,Moneda GSI RER,USD,1,Moneda GSI RER,,,,,1
+55,MLCC (LX),Moneda Latam Corporate Credit Fund,USD,1,MLCCII,Latam FI USD,Latam FI USD,,,0
+56,MSCLUX,Moneda Latin America Small Cap (LX),USD,1,MSCLUX_2,Latam Equities,,MSCI Latam IMI Net TR Ex BR,M1LA7IMR,0
+57,ALTURAS II ESPEJO,Alturas II Espejo,USD,1,ALTURAS II_Espejo,,,,,1
+58,CARLYLE PVIII,Carlyle PVIII,USD,1,CARLYLEPVIII,,,,,1
+59,MLATHY,Moneda LatAm High Yield Credit Fund PLC,USD,1,MLATHY,Latam FI USD,Latam FI USD,,,1
+60,MDLAT/MLATHY,MDLAT (With MLATHY Shares Opened),USD,1,MDLAT+MLATHY,,Latam FI USD,,,0
+61,MLCD (Simulation),Moneda Latin American Corporate Debt (Simulation),USD,1,MLCD_Gundersen,,,,,0
+62,MCPPP,Moneda Cumplo Pronto Pago Pymes Fondo de Inversión,CLP,39,MCPPP,Chilean FI,,,,1
+63,MCCDF,Moneda Carlyle CLO Debt Fund,USD,1,MCCDF,,,,,1
+64,MGSI RC III,Moneda GSI Rentas Comerciales III,CLP,39,MGSI RC III,,,,,1
+65,MCIT,Moneda USA Collective Investment Trust,USD,1,MCIT,Latam FI USD,Latam FI USD,,,1
+66,GSI RIE I,Moneda GSI Rentas Infraestructura Europa I,EUR,61,GSI RIE I,,,,,0
+67,GSI RL II,Moneda GSI Rentas Logísticas II,CLP,39,GSI RL II,,,,,0
+68,MLCC (Geneva),Moneda Latam Corporate Credit Fund (Geneva),USD,1,MLCCII (Geneva),Latam FI USD,Latam FI USD,,,0
+69,Latam Private Credit,Latam Private Credit,USD,1,Latam Private Credit,,,,,0
+70,CARLYLERPIX,CARLYLERPIX,USD,1,CARLYLERPIX,,,,,0
+71,MCETP V,MCETP V,EUR,61,MCETP V,,,,,0
+72,MAGS,Moneda Alternatives Global Solutions,USD,1,MAGS,,,,,0
+73,GSI RTE II,Moneda GSI Rentas Transición Energética II,USD,1,GSI RTE II,,,,,0
+74,MRCOP,Moneda Renta COP,COP,41,Moneda Renta COP,Latam FI LC,,,,1
+75,MCAPVI,Moneda Carlyle Asia Partners VI,USD,1,MCAPVI,,,,,0
+76,MASFVIII,Moneda Alpinvest Secondaries VIII,USD,1,MASFVIII,,,,,0

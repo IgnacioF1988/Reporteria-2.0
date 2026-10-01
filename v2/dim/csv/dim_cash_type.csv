@@ -1,0 +1,7 @@
+Cash_Type_Code,Cash_Type
+0,No Aplica
+1,Restricted
+2,Unrestricted
+3,Restricted (Deriv.)
+4,Restricted (REPO)
+5,DAP

@@ -1,0 +1,7 @@
+Coupon_Type_Code,Coupon_Type
+0,No Aplica
+1,Fixed
+2,Floating
+3,Inflation-Linked
+4,Warrant
+5,Custom
