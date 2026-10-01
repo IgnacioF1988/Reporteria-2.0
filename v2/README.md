@@ -135,9 +135,10 @@ solo la caché. Si no hay caché ni conexión se lee el RPT en Excel (`FACTURAS_
 `documento_operacion_id` de Facts y manda (Geneva antepone `RC` en MRCLP, así que el nemotécnico de Facts no está en HOMOL);
 respaldo `nemotecnico → HOMOL_INSTRUMENTOS (GENEVA) → ID_Instrumento`; `fondo → HOMOL_FUNDS / BD_FUNDS → ID_Fund`.
 Yield = `tasa_mensual × 12` (decimal, base 30 días), Duration = días al vencimiento vigente / 365. Morosa (vencida y no
-pagada al cierre): tasa × 12 y duration `factura_morosa_duration` (0), alerta INFO `FACTURA_MOROSA`. Una posición del CUBO que
-Facts tiene pagada antes del cierre o comprada después queda FALTANTE con motivo `FACTURA_PAGADA_{fecha}` /
-`FACTURA_COMPRADA_DESPUES_DEL_CIERRE`; las facturas vivas en Facts sin posición en el CUBO salen una a una en
+pagada al cierre): tasa × 12 y duration `factura_morosa_duration` (0), alerta INFO `FACTURA_MOROSA`. Pagada el día del cierre
+cuenta como viva (el CUBO aún la tiene); `fecha_inversion` posterior al cierre no excluye (INFO `FACTURA_COMPRADA_DESPUES`). Una
+posición del CUBO que Facts tiene pagada antes del cierre queda FALTANTE con motivo `FACTURA_PAGADA_{fecha}`; el sufijo de
+prórroga de Geneva (`FACRCPP58698PR1`) cruza con el documento original; las facturas vivas en Facts sin posición en el CUBO salen una a una en
 `FACTURA_SIN_POSICION` (INFO, con fondo, estado y vencimiento).
 
 Estado **al cierre** (`lectura/facts.facturas_al_cierre`): la base está viva, así que se revierten con `bi_cambios` los cambios

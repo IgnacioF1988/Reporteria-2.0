@@ -83,6 +83,17 @@ def test_no_vivas_explican_el_faltante_y_sobrantes_por_fila():
     cand, al = candidatos_facturas(pos, rpt, {}, FONDOS, SETTLE, parametros={})
     c = cand.set_index("PK2")
     assert c.loc["600-39", "Motivo_Descarte"] == f"FACTURA_PAGADA_{SETTLE - pd.Timedelta(days=2):%Y%m%d}" and "pagado" in c.loc["600-39", "Detalle"]
-    assert c.loc["601-39", "Motivo_Descarte"] == "FACTURA_COMPRADA_DESPUES_DEL_CIERRE"
+    assert c.loc["601-39", "Valido"] and (al["Nombre"] == "FACTURA_COMPRADA_DESPUES").sum() == 1   # el CUBO la tiene: se resuelve y se avisa
     s = al[al["Nombre"] == "FACTURA_SIN_POSICION"]
     assert len(s) == 1 and s["PK2"].iloc[0] == "FACPP602" and s["Valor"].iloc[0] == 1000.0 and "fondo=MRCLP" in s["Detalle"].iloc[0]
+
+
+def test_pagada_el_dia_del_cierre_y_sufijo_de_prorroga():
+    pos = pd.DataFrame([{**_pos("700-39", 700), "Name_Instrumento": "FACRC52656"}, {**_pos("701-39", 701), "Name_Instrumento": "FACRCPP58698PR1"}])
+    rpt = pd.DataFrame([_rpt(documento_operacion_id=52656, nemotecnico="FAC52656", estado="pagado", fecha_pago=SETTLE, tasa_origen="ORIGINAL", cambios_revertidos=0, viva=True),
+                        _rpt(documento_operacion_id=58698, nemotecnico="FACPP58698", estado="prorrogado", tasa_mensual=0.0095, tasa_origen="PRORROGA", cambios_revertidos=0, viva=True)])
+    cand, al = candidatos_facturas(pos, rpt, {}, FONDOS, SETTLE, parametros={})
+    c = cand.set_index("PK2")
+    assert c.loc["700-39", "Valido"] and abs(c.loc["700-39", "Yield"] - 0.096) < 1e-12          # pagada el 31-07: viva al cierre
+    assert c.loc["701-39", "Valido"] and c.loc["701-39", "Origen"] == "FACTS:FACPP58698" and abs(c.loc["701-39", "Yield"] - 0.114) < 1e-12
+    assert not (al["Nombre"] == "FACTURA_SIN_POSICION").any()

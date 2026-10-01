@@ -236,6 +236,15 @@ Resolución de fondo: `Fund_Name`/`Fondo` (upper) contra `BD_FUNDS.FundShortName
 ### Corrida real (30-09, commit fcd7724) y ajustes
 Facts bajó 53.517 facturas / 100 prórrogas / 239.563 cambios; 3.433 vivas al cierre; RESUELTO 6.306, FALTANTE 891 (730 facturas). Causas y arreglos: (1) MRCLP 0 de 473: Geneva nombra `FACRC{tipo}{doc}` y Facts `FAC{tipo}{doc}` → cruce por `documento_operacion_id` = número del nombre (manda), HOMOL de respaldo; (2) 185 morosas en MCPPP (vencidas y no pagadas) → tasa × 12 y duration `factura_morosa_duration` (0), INFO `FACTURA_MOROSA`; (3) 332 `FACTURA_MONTO_DISTINTO` falsas (−1 % a −4,7 %: el MV va a precio 101 con devengo) → comparar contra `Qty` (nominal).
 
+### Segunda corrida (01-10, commit d3f5033): 3.390 de 3.540 facturas; 149 sin cruce explicadas
+| Caso | N | Causa | Arreglo (en `fuentes/facturas.py`, tests en `test_fuentes_facturas.py`) |
+|---|---|---|---|
+| Pagadas el mismo día del cierre (31-07) | 78 (65 USD MRCLP, 13 MCPPP) | el CUBO las tiene al cierre; la regla de viva exigía `fecha_pago > settle` | viva = `fecha_pago >= settle` (misma convención que los cambios del día del cierre); duration según vencimiento (morosa si ya venció) |
+| `fecha_inversion` posterior al cierre | 52 (MCPPP) | Facts fecha por el primer pago de nómina, Geneva contabiliza antes; el CUBO manda | no excluir por `fecha_inversion`; INFO `FACTURA_COMPRADA_DESPUES` informativa |
+| Sufijo de prórroga en Geneva (`FACRCPP58698PR1`) | 8 (MRCLP) | el regex del número exigía dígitos al final | `^FAC[A-Z]*(\d+)(?:PR\d+)?$` → cruza con el documento original (vivo, prorrogado) |
+| Pagadas antes del cierre (feb–29-jul) | 11 | posiciones rezagadas en el CUBO | quedan FALTANTE con `FACTURA_PAGADA_{fecha}` (correcto; override si procede) |
+`FNCHI-030926` ya resolvió por RA. Las 43 `FACTURA_SIN_POSICION` son facturas pagadas en agosto que el CUBO ya no tiene con ese nombre (en MRCLP están como `…PR1`): se resuelven con el regex.
+
 ### Verificación
 `pytest -q` verde · `python -m reporteria.cli check --fecha 20260731` muestra las líneas de Facts · en la estación: `pip install -e .[facts]`, `.env` con `MONEDA_BI_PASSWORD` y llave, `facts-probar --fecha 20260731` cuenta filas · `correr --fecha 20260731` baja las tablas y deja `04_CACHE/20260731/facts_*.csv`; `resumen`: las 3.540 facturas pasan de FALTANTE a RESUELTO con `Fuente=FACTURA`, cobertura MRCLP sube · `correr --sin-facts` reproduce idéntico (`comparar` → 0 diferencias).
 

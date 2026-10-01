@@ -15,7 +15,7 @@ from .. import alertas
 from ..modelo import candidato, candidatos_vacios
 
 
-NUMERO_FACTURA = re.compile(r"^FAC[A-Z]*(\d+)$")
+NUMERO_FACTURA = re.compile(r"^FAC[A-Z]*(\d+)(?:PR\d+)?$")     # FACRCPP58698PR1: Geneva marca la prórroga con sufijo
 
 
 def _numero(nombre) -> int | None:
@@ -42,7 +42,7 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
         al.append(alertas.emitir("FACTURA_FONDO_DESCONOCIDO", "MEDIA", detalle=f"fondos del RPT sin match en HOMOL_FUNDS: {sorted(set(r.loc[sin_fondo, 'fondo']))}", ambito="CORRIDA"))
     pagada = pd.to_datetime(r["fecha_pago"], errors="coerce")
     comprada = pd.to_datetime(r["fecha_inversion"], errors="coerce") if "fecha_inversion" in r.columns else pd.Series(pd.NaT, index=r.index)
-    es_viva = (pagada.isna() | (pagada > settle)) & (comprada.isna() | (comprada <= settle))
+    es_viva = pagada.isna() | (pagada >= settle)        # pagada el día del cierre sigue en el CUBO: viva; fecha_inversion no excluye (el CUBO manda)
     con_fondo = r[r["ID_Fund"].notna()].copy()
     con_fondo["ID_Fund"] = con_fondo["ID_Fund"].astype(int)
     vivas = con_fondo[es_viva[con_fondo.index]].copy()
@@ -55,7 +55,7 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
     con_iid = vivas[vivas["ID_Instrumento"].notna()]
     por_iid = {(int(f), int(k)): i for i, f, k in zip(con_iid.index[::-1], con_iid["ID_Fund"][::-1], con_iid["ID_Instrumento"][::-1])}  # primera aparición gana
 
-    filas, dif, usadas, prorr, rev, morosas = [], [], set(), [], [], []
+    filas, dif, usadas, prorr, rev, morosas, tardias = [], [], set(), [], [], [], []
     for _, p in obj.iterrows():
         fid = int(p["ID_Fund"])
         n = _numero(p.get("Name_Instrumento", ""))
@@ -69,8 +69,7 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
             else:                                   # existe en Facts pero no estaba viva al cierre: se explica
                 nv = no_vivas.loc[j]
                 pag = pd.to_datetime(nv.get("fecha_pago"), errors="coerce")
-                motivo = f"FACTURA_PAGADA_{pag:%Y%m%d}" if pd.notna(pag) and pag <= settle else "FACTURA_COMPRADA_DESPUES_DEL_CIERRE"
-                filas.append(candidato(p, "FACTURA", valido=False, motivo=motivo, detalle=f"Facts estado={nv.get('estado', '')} fecha_pago={pag:%Y-%m-%d}" if pd.notna(pag) else f"Facts estado={nv.get('estado', '')}"))
+                filas.append(candidato(p, "FACTURA", valido=False, motivo=f"FACTURA_PAGADA_{pag:%Y%m%d}", detalle=f"Facts estado={nv.get('estado', '')} fecha_pago={pag:%Y-%m-%d}"))
             continue
         f = vivas.loc[i]
         usadas.add(i)
@@ -85,6 +84,8 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
                                origen=origen, detalle=f"tasa_mensual={f['tasa_mensual']} dias={dias} monto_compra={f['monto_compra']}{extra}"))
         if morosa:
             morosas.append({**p.to_dict(), "Valor": dias})
+        if pd.notna(comprada.get(i)) and comprada[i] > settle:
+            tardias.append({**p.to_dict(), "Valor": comprada[i].strftime("%Y-%m-%d")})
         if facts and str(f.get("tasa_origen", "")) == "PRORROGA":
             prorr.append({**p.to_dict(), "Valor": float(f["tasa_mensual"]) * 12})
         if facts and pd.notna(f.get("cambios_revertidos")) and int(f["cambios_revertidos"]) > 0:
@@ -93,6 +94,8 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
         base = qty if pd.notna(qty) and qty else p.get("TotalMVal")     # nominal comprado; el MV va a precio con devengo
         if pd.notna(f["monto_compra"]) and pd.notna(base) and base and abs(f["monto_compra"] - base) / abs(base) > tolerancia_monto:
             dif.append({**p.to_dict(), "Valor": f["monto_compra"] / base - 1})
+    if tardias:
+        al.append(alertas.emitir("FACTURA_COMPRADA_DESPUES", "INFO", pd.DataFrame(tardias), "fecha_inversion de Facts posterior al cierre (primer pago de nómina); el CUBO ya la tiene", valor="Valor"))
     if morosas:
         al.append(alertas.emitir("FACTURA_MOROSA", "INFO", pd.DataFrame(morosas), f"vencida y no pagada al cierre: tasa × 12 y duration {dur_morosa:g}", valor="Valor"))
     if prorr:

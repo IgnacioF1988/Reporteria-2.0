@@ -1,7 +1,7 @@
 """Facturas desde la base de Facts (bi_facturas / bi_prorrogas / bi_cambios): estado de cada factura AL CIERRE.
 
 La base está viva y el cierre se corre días después: se revierten con bi_cambios los cambios de tasa, vencimiento y monto
-posteriores al cierre; una factura pagada después del cierre sigue viva al cierre; si hay prórroga iniciada al cierre o
+posteriores al cierre; una factura pagada el día del cierre o después sigue viva al cierre; si hay prórroga iniciada al cierre o
 antes, mandan su tasa y su vencimiento (el RPT usa la tasa original: aquí se documenta la diferencia en `tasa_origen`).
 """
 from __future__ import annotations
@@ -51,15 +51,15 @@ def normalizar_tablas(t: dict) -> dict[str, pd.DataFrame]:
 def facturas_al_cierre(t: dict[str, pd.DataFrame], settle: pd.Timestamp, incluir_no_vivas: bool = False) -> pd.DataFrame:
     """Una fila por factura viva al cierre con tasa, vencimiento y monto vigentes a esa fecha (ver docstring del módulo).
 
-    Con `incluir_no_vivas` devuelve también las pagadas antes del cierre y las compradas después, con `viva=False`, para
-    explicar en el reporte por qué una posición del CUBO no cruza.
+    Con `incluir_no_vivas` devuelve también las pagadas antes del cierre con `viva=False`, para explicar en el reporte por qué
+    una posición del CUBO no cruza. `fecha_inversion` (primer pago de nómina) no excluye: el CUBO manda.
     """
     f = t["facturas"].copy()
     f["tasa_origen"], f["vencimiento_origen"], f["cambios_revertidos"] = "ORIGINAL", "ORIGINAL", 0
     f = f[f["documento_operacion_id"].notna()]
     if "fecha_inversion" not in f.columns:
         f["fecha_inversion"] = pd.NaT
-    f["viva"] = (f["fecha_inversion"].isna() | (f["fecha_inversion"] <= settle)) & (f["fecha_pago"].isna() | (f["fecha_pago"] > settle))
+    f["viva"] = f["fecha_pago"].isna() | (f["fecha_pago"] >= settle)      # pagada el día del cierre sigue viva; fecha_inversion no excluye
     if not incluir_no_vivas:
         f = f[f["viva"]]
     f = f.set_index("documento_operacion_id")

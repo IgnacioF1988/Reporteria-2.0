@@ -57,7 +57,7 @@ def test_tasa_asof_y_cambio_del_mismo_dia_cuenta():
     assert abs(r["tasa_mensual"] - 0.0066) < 1e-12 and r["tasa_origen"] == "CAMBIO_REVERTIDO" and r["monto_compra"] == 90 and r["cambios_revertidos"] == 2
     r = _doc(facturas_al_cierre(t, pd.Timestamp("2026-06-04")), 1)        # cambio del día del cierre: ya está en el cierre
     assert abs(r["tasa_mensual"] - 0.0070) < 1e-12 and r["cambios_revertidos"] == 1
-    assert facturas_al_cierre(t, pd.Timestamp("2026-04-30")).empty      # comprada después del cierre: no existía
+    assert len(facturas_al_cierre(t, pd.Timestamp("2026-04-30"))) == 1   # fecha_inversion posterior no excluye (el CUBO manda)
 
 
 def test_columnas_faltantes_y_tasa_en_porcentaje():
@@ -73,4 +73,5 @@ def test_incluir_no_vivas_marca_pagadas_y_posteriores(tablas):
     todas = facturas_al_cierre(tablas, pd.Timestamp("2026-07-31"), incluir_no_vivas=True)
     assert len(todas) == 187 and todas["viva"].dtype == bool
     assert not _doc(todas, 58964)["viva"] and _doc(todas, 59396)["viva"]          # pagada 17-07 vs pagada 18-08
+    assert _doc(facturas_al_cierre(tablas, pd.Timestamp("2026-07-17"), incluir_no_vivas=True), 58964)["viva"]   # pagada el día del cierre: viva
     assert set(facturas_al_cierre(tablas, pd.Timestamp("2026-07-31"))["documento_operacion_id"]) == set(todas.loc[todas["viva"], "documento_operacion_id"])
