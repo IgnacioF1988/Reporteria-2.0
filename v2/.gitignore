@@ -10,3 +10,6 @@ __pycache__/
 tests/fixtures/**/dimensionales.duckdb
 tests/fixtures/**/csv/
 dim/DIM_*.xlsx
+01_INPUTS/MANUALES/REGLAS_backup_*.xlsx
+01_INPUTS/MANUALES/REGLAS_migracion_*.xlsx
+01_INPUTS/**/~$*

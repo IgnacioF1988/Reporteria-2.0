@@ -36,6 +36,8 @@ def check(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | N
             faltan += 1
             typer.echo(f"  [ERR] REGLAS.xlsx: {e}")
     typer.echo(f"  cierre anterior detectado: {r.fecha_ant or '(ninguno)'}")
+    for linea in _estado_raiz(r):
+        typer.echo(f"  {linea}")
     for linea in _estado_datamart(r):
         typer.echo(f"  {linea}")
     for linea in _estado_dim(r):
@@ -43,6 +45,25 @@ def check(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | N
     for linea in _estado_entorno(r):
         typer.echo(f"  {linea}")
     raise typer.Exit(2 if faltan else 0)
+
+
+def _estado_raiz(r: Rutas) -> list[str]:
+    """v2 es autónomo: todo bajo la carpeta del paquete salvo CUBO y BIX (shares)."""
+    import os
+    from .config import RAIZ_PAQUETE
+    out = [f"[OK ] raíz {r.raiz}" + ("" if Path(r.raiz).resolve() == RAIZ_PAQUETE else " (distinta de la carpeta del paquete: solo para pruebas)")]
+    if os.environ.get("REPORTERIA_RAIZ"):
+        out.append("[AVISO] REPORTERIA_RAIZ ya no se usa: la raíz es siempre la carpeta del paquete (v2); bórrela del .env")
+    externos = {"CUBO", "BD_INSTRUMENTOS", "DEFAULTED", "HOMOL_INSTRUMENTOS", "HOMOL_FUNDS"}
+    raiz = Path(r.raiz).resolve()
+    for nombre, ruta in {**r.obligatorias(), **r.opcionales()}.items():
+        if nombre in externos or ruta is None or not Path(ruta).exists():
+            continue
+        try:
+            Path(ruta).resolve().relative_to(raiz)
+        except ValueError:
+            out.append(f"[AVISO] {nombre} está fuera de la raíz: {ruta}")
+    return out
 
 
 def _estado_datamart(r: Rutas) -> list[str]:
@@ -102,6 +123,23 @@ def _estado_facts(r: Rutas) -> list[str]:
     return out
 
 
+def _migrados_en_reglas(r: Rutas) -> set[str]:
+    """Archivos legacy cuyas filas ya están en REGLAS (Comentario 'migrado de X')."""
+    import pandas as pd
+    if not Path(r.reglas).exists():
+        return set()
+    out = set()
+    try:
+        for h, df in pd.read_excel(r.reglas, sheet_name=None).items():
+            if "Comentario" in df.columns:
+                for c in df["Comentario"].dropna().astype(str):
+                    if c.startswith("migrado de "):
+                        out.add(c.split("migrado de ", 1)[1].split()[0].rstrip(":;,"))
+    except Exception:       # noqa: BLE001 — diagnóstico, nunca bloquea
+        pass
+    return out
+
+
 def _estado_entorno(r: Rutas) -> list[str]:
     """Líneas de diagnóstico: .env, xbbg/pyodbc, caché del cierre, antigüedad del jsonl, manuales legacy sin migrar."""
     import importlib.util
@@ -130,6 +168,7 @@ def _estado_entorno(r: Rutas) -> list[str]:
         out.append(f"[{'OK ' if dias <= 35 else 'AVISO'}] bond_schedule.jsonl con {dias:.0f} días de antigüedad{' (> 35: pedir refresco a Geneva)' if dias > 35 else ''}")
     legacy = [p.name for d in (Path(r.reglas).parent, Path(r.jsonl).parent) if d.is_dir()
               for p in list(d.glob("FIP.xlsx")) + list(d.glob("DEFAULTEADOS.xlsx")) + list(d.glob("OVERRIDES.xlsx")) + list(d.glob("Atributos_*.xlsx"))]
+    legacy = [n for n in legacy if n not in _migrados_en_reglas(r)]
     if legacy:
         out.append(f"[AVISO] manuales legacy sin migrar: {sorted(set(legacy))} → reporteria migrar-manuales --fecha {r.fecha} --legacy <carpeta>")
     return out

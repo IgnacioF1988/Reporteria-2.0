@@ -1,2 +1,4 @@
 *.duckdb binary
 *.parquet binary -diff
+*.csv text eol=lf
+*.jsonl text eol=lf
