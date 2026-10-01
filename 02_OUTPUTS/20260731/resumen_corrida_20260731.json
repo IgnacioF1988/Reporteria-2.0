@@ -54,11 +54,11 @@
     76
   ],
   "estado": {
-    "RESUELTO": 6887,
-    "FALTANTE": 310
+    "RESUELTO": 7025,
+    "FALTANTE": 172
   },
   "fuente": {
-    "FACTURA": 3390,
+    "FACTURA": 3528,
     "CERO": 1636,
     "JPM": 600,
     "BBG": 402,
@@ -71,8 +71,8 @@
   },
   "conversion": {
     "BREAKEVEN": 244,
+    "DROP": 122,
     "XCCY": 104,
-    "DROP": 57,
     "PROVEEDOR_NOMINAL": 7,
     "SUMA_INDICE": 5
   },
@@ -100,7 +100,7 @@
     "16": 0.9961,
     "17": 0.9874,
     "19": 1.0,
-    "20": 0.8738,
+    "20": 0.8744,
     "23": 0.0621,
     "25": 1.0,
     "26": 1.0,
@@ -127,7 +127,7 @@
     "57": 0.9623,
     "58": 1.0,
     "59": 0.9966,
-    "62": 0.7441,
+    "62": 0.7649,
     "64": 0.4182,
     "65": 0.9957,
     "67": 0.3507,
@@ -179,7 +179,7 @@
       null
     ],
     "20": [
-      0.069152,
+      0.069259,
       0.093074
     ],
     "23": [
@@ -287,8 +287,8 @@
       0.081245
     ],
     "62": [
-      0.055475,
-      0.090848
+      0.057747,
+      0.091004
     ],
     "64": [
       0.0,
@@ -343,17 +343,18 @@
     "ALTA|CAJA_SIN_REGLA": 176,
     "ALTA|COBERTURA_BAJA": 8,
     "ALTA|DEFAULT_CON_AI": 8,
-    "ALTA|FALTANTE": 310,
+    "ALTA|FALTANTE": 172,
     "ALTA|MONEDA_SIN_CURVAS_DROP": 1,
     "ALTA|SIN_BREAKEVEN": 1,
     "ALTA|SIN_CONVERSION_HEDGE": 6,
     "ALTA|YIELD_NEGATIVA": 16,
     "CRITICA|YIELD_ALTA": 67,
-    "INFO|CURVA_EXTRAPOLADA": 104,
+    "INFO|CURVA_EXTRAPOLADA": 169,
     "INFO|FACTURA_ASOF_REVERTIDA": 12,
-    "INFO|FACTURA_MOROSA": 233,
-    "INFO|FACTURA_SIN_POSICION": 43,
-    "INFO|FACTURA_TASA_PRORROGA": 5,
+    "INFO|FACTURA_COMPRADA_DESPUES": 52,
+    "INFO|FACTURA_MOROSA": 244,
+    "INFO|FACTURA_SIN_POSICION": 9207,
+    "INFO|FACTURA_TASA_PRORROGA": 13,
     "INFO|FAMILIA_INFERIDA": 74,
     "INFO|FLOTANTE_PROVEEDOR": 5,
     "INFO|INDICE_SIN_CURVA": 2,
@@ -361,6 +362,7 @@
     "MEDIA|BONO_SIN_AI": 124,
     "MEDIA|CAJA_SIN_VALOR": 42,
     "MEDIA|ESCALA_FALLBACK": 23,
+    "MEDIA|FACTURA_MONTO_DISTINTO": 8,
     "MEDIA|HEDGE_NUEVO": 354,
     "MEDIA|HEDGE_PAIS_SIN_MONEDA": 94,
     "MEDIA|HEDGE_PAPEL_NO_USD": 4,
@@ -376,5 +378,5 @@
     "HEDGE_CONVERTIDO",
     "SIN_TRATAMIENTO"
   ],
-  "segundos": 117.2
+  "segundos": 106.3
 }
