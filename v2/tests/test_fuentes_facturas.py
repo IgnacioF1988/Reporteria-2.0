@@ -79,7 +79,8 @@ def test_no_vivas_explican_el_faltante_y_sobrantes_por_fila():
     pos = pd.DataFrame([{**_pos("600-39", 600), "Name_Instrumento": "FACPP600"}, {**_pos("601-39", 601), "Name_Instrumento": "FACPP601"}])
     rpt = pd.DataFrame([_rpt(documento_operacion_id=600, nemotecnico="FACPP600", estado="pagado", fecha_pago=SETTLE - pd.Timedelta(days=2), tasa_origen="ORIGINAL", cambios_revertidos=0, viva=False),
                         _rpt(documento_operacion_id=601, nemotecnico="FACPP601", fecha_inversion=SETTLE + pd.Timedelta(days=1), tasa_origen="ORIGINAL", cambios_revertidos=0, viva=False),
-                        _rpt(documento_operacion_id=602, nemotecnico="FACPP602", fecha_inversion=SETTLE - pd.Timedelta(days=5), tasa_origen="ORIGINAL", cambios_revertidos=0, viva=True)])
+                        _rpt(documento_operacion_id=602, nemotecnico="FACPP602", fecha_inversion=SETTLE - pd.Timedelta(days=5), tasa_origen="ORIGINAL", cambios_revertidos=0, viva=True),
+                        _rpt(documento_operacion_id=603, nemotecnico="FACPP603", fecha_inversion=SETTLE + pd.Timedelta(days=10), tasa_origen="ORIGINAL", cambios_revertidos=0, viva=True)])  # comprada después y sin posición: no es sobrante
     cand, al = candidatos_facturas(pos, rpt, {}, FONDOS, SETTLE, parametros={})
     c = cand.set_index("PK2")
     assert c.loc["600-39", "Motivo_Descarte"] == f"FACTURA_PAGADA_{SETTLE - pd.Timedelta(days=2):%Y%m%d}" and "pagado" in c.loc["600-39", "Detalle"]

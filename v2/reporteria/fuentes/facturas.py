@@ -104,7 +104,8 @@ def candidatos_facturas(pos: pd.DataFrame, rpt: pd.DataFrame | None, homol_genev
         al.append(alertas.emitir("FACTURA_ASOF_REVERTIDA", "INFO", pd.DataFrame(rev), "cambios de Facts posteriores al cierre revertidos (as-of)", valor="Valor"))
     if dif:
         al.append(alertas.emitir("FACTURA_MONTO_DISTINTO", "MEDIA", pd.DataFrame(dif), "monto_compra de Facts/RPT difiere de la cantidad (nominal) del CUBO", valor="Valor"))
-    sobr = vivas.loc[[i for i in vivas.index if i not in usadas]]
+    # sobrantes: solo lo comprado hasta el cierre (lo comprado después no puede estar en el CUBO del cierre)
+    sobr = vivas.loc[[i for i in vivas.index if i not in usadas and (pd.isna(comprada.get(i)) or comprada[i] <= settle)]]
     if len(sobr):
         filas_sobr = pd.DataFrame({"Pos_ID": "", "ID_Fund": sobr["ID_Fund"].values, "PK2": sobr["nemotecnico"].values, "Name_Instrumento": sobr["nemotecnico"].values,
                                    "Valor": pd.to_numeric(sobr["monto_compra"], errors="coerce").values,

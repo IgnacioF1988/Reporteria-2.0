@@ -245,6 +245,9 @@ Facts bajó 53.517 facturas / 100 prórrogas / 239.563 cambios; 3.433 vivas al c
 | Pagadas antes del cierre (feb–29-jul) | 11 | posiciones rezagadas en el CUBO | quedan FALTANTE con `FACTURA_PAGADA_{fecha}` (correcto; override si procede) |
 `FNCHI-030926` ya resolvió por RA. Las 43 `FACTURA_SIN_POSICION` son facturas pagadas en agosto que el CUBO ya no tiene con ese nombre (en MRCLP están como `…PR1`): se resuelven con el regex.
 
+### Tercera corrida (01-10, commit 43a2d7a): 3.529 de 3.540; quedan las 11 pagadas antes del cierre
+Efecto no deseado: `FACTURA_SIN_POSICION` pasó de 43 a 9.207 porque al no excluir por `fecha_inversion` las compradas en agosto y septiembre cuentan como vivas. Ajuste en `fuentes/facturas.py`: los sobrantes se calculan solo sobre vivas con `fecha_inversion` vacía o `<= settle` (el cruce de posiciones del CUBO sigue sin filtrar por fecha). Test: una viva con `fecha_inversion > settle` y sin posición no genera alerta. Esperado tras el ajuste: `FACTURA_SIN_POSICION` ≈ 0–10.
+
 ### Verificación
 `pytest -q` verde · `python -m reporteria.cli check --fecha 20260731` muestra las líneas de Facts · en la estación: `pip install -e .[facts]`, `.env` con `MONEDA_BI_PASSWORD` y llave, `facts-probar --fecha 20260731` cuenta filas · `correr --fecha 20260731` baja las tablas y deja `04_CACHE/20260731/facts_*.csv`; `resumen`: las 3.540 facturas pasan de FALTANTE a RESUELTO con `Fuente=FACTURA`, cobertura MRCLP sube · `correr --sin-facts` reproduce idéntico (`comparar` → 0 diferencias).
 
