@@ -26,7 +26,7 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
    - `reglas_aplicadas` e `insumos`: qué fila de REGLAS actuó y qué archivos se usaron.
 7. Clasificaciones nuevas (hoja `plantilla_dim`: combinaciones de códigos sin Bucket / Ficha_FI / FX_Exposure): `reporteria dim exportar`, pegar las filas de la plantilla en la hoja `dim_clasificacion` del Excel (dejar vacías las columnas que no importan; `ID_Fund` solo si es propio de un fondo), `reporteria dim importar --excel <archivo>`, `git add dim/` + commit. Volver a correr `--sin-bbg`.
 8. Overrides de atributo (hedge distinto, índice, bucket por fondo): `REGLAS/overrides_atributo` con `Field` ∈ Hedge_Currency, Indice, Bucket, Risk_Currency, Risk_Country y vigencia. Correr de nuevo `--sin-bbg`.
-9. Cerrar: el reporte final es el último `REPORTE_F.xlsx`. El cierre siguiente lo usa como cierre anterior (hedge heredado y alertas temporales A05–A07).
+9. Publicar: `reporteria publicar --fecha F` (toma el último borrador de `02_OUTPUTS\F\borradores`; con `--borrador TS` otro) → `git add datamart`, commit, push. Esa versión es lo reportado y queda congelada; el cierre siguiente la usa como cierre anterior (hedge heredado y alertas A05–A07). Si después hay que corregir el cierre: volver a correr y `publicar --reexpresar --motivo "qué cambió"` (nueva versión; `reporte --fecha F --publicada` sigue dando la original). `reporteria versiones` muestra lo que hay.
 
 ## Versiones
 - `xbbg` 0.7 y ≥ 1.0 funcionan (el adaptador detecta la versión). La 1.x necesita `pyarrow>=22` (viene en el extra `bbg`); si aparece `Backend 'pyarrow' requires pyarrow >= 22`, correr `py -3.12 -m pip install --user --upgrade "pyarrow>=22"`.

@@ -34,6 +34,9 @@ reporteria facts-probar                                          # túnel SSH a 
 reporteria dim importar --bix <RUTA_BIX> [--reemplazar]          # dimensionales: migra BD_BalanceSheet / FX / catálogos a dim/dimensionales.duckdb
 reporteria dim exportar | dim importar --excel DIM.xlsx          # ciclo de edición (valida antes de escribir)
 reporteria dim validar --fecha 20260731 | dim probar --fecha 20260731   # consistencia; clasificación del CUBO con las dimensionales
+reporteria publicar --fecha 20260731 [--reexpresar --motivo "…"]  # fija la versión oficial del cierre en datamart/ (luego git add datamart && commit)
+reporteria versiones [--fecha F] | reporte --fecha F [--publicada|--version N|--conocimiento D]   # qué hay; regenerar el Excel de una versión
+reporteria comparar --fecha F --version-a 1 --version-b 2       # diferencias entre dos versiones del datamart
 ```
 El paso a paso del operador está en [`CHECKLIST_CIERRE.md`](CHECKLIST_CIERRE.md).
 Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input obligatorio o REGLAS inválido.
@@ -78,6 +81,8 @@ en `candidatos` con su motivo. Las posiciones hedgeadas (`Hedge_Currency` por fo
 03_LOGS/{FECHA}/      corrida_*.log
 04_CACHE/{FECHA}/     respuestas de Bloomberg y FX (permite --sin-bbg)
 v2/dim/               dimensionales.duckdb (versionado en git) + csv/ espejo legible para el diff
+v2/datamart/          cierres/cierre={FECHA}/version=NNN/ (Parquet inmutable por versión publicada, en git)
+02_OUTPUTS/{FECHA}/borradores/borrador_{ts}/   cada corrida, mismo formato; `publicar` copia uno al datamart
 ```
 CUBO, BD_INSTRUMENTOS, HOMOL y DEFAULTED se leen donde están (`RUTA_CUBO_DIR`, `RUTA_BIX`). Las dimensionales
 (clasificación, fondos, monedas, catálogos) viven en el repo: ver §Dimensionales.
@@ -90,6 +95,22 @@ del fondo) gana siempre a la genérica. `BalSheetKey` (los 9 campos concatenados
 Lo que ninguna fila define queda en `SIN_REGLA` (Bucket) o vacío (Ficha_FI / FX_Exposure) con alerta y sale en la hoja
 `plantilla_dim` del reporte, listo para pegar como fila nueva. Encima actúan `REGLAS/clasificacion` (por instrumento o
 regex) y `REGLAS/overrides_atributo` (`Field=Bucket`).
+
+## Versiones del cierre y datamart (`v2/datamart/`)
+Cada `correr` deja, además del Excel, un **borrador** completo en `02_OUTPUTS/{F}/borradores/borrador_{ts}/`: una tabla Parquet por
+hoja del reporte, `posiciones.parquet` con todas las columnas de la cartera (incluidos los atributos del maestro que decidieron el
+resultado), `insumos/` (copias de REGLAS, RA_TIR, paridades, jsonl, EXCEPCIONES y el CSV de dim; hashes de CUBO, JPM, curvas, dim y caché;
+`facturas_al_cierre.parquet`) y `corrida.json` (fecha, hora, opciones, hash del código, cierre anterior usado). Los borradores no van a git.
+
+`reporteria publicar --fecha F` copia el último borrador (o `--borrador TS`) a `datamart/cierres/cierre=F/version=001/` como **PUBLICADA**:
+eso es "lo reportado" y nunca se reescribe. Una segunda publicación exige `--reexpresar --motivo "…"` y crea `version=002` **REEXPRESADA**;
+`publicacion.json` lleva el historial. Después del `publicar`: `git add datamart && git commit && git push`.
+
+Lectura: `reporte --fecha F` regenera el Excel de la **última verdad** (mayor versión); `--publicada` lo reportado; `--version N`; `--conocimiento D`
+la última versión publicada hasta ese día. `versiones` lista todo; `comparar --version-a A --version-b B` muestra las diferencias de Yield,
+Duration, Fuente, Conversion y Estado. El cierre anterior de una corrida se toma de la última verdad del datamart y, si no hay versión, del
+`REPORTE_{F-1}.xlsx` como antes (`resumen.anterior_version` dice cuál se usó). H9b–H9d (maestros bitemporales, impacto y re-expresión
+automática, consulta por fecha de conocimiento) están en PLAN.md §5g.
 
 ## Dimensionales (`v2/dim/dimensionales.duckdb`)
 Un solo archivo DuckDB **versionado en git** es la fuente de verdad; reemplaza a `BD_BalanceSheet`, las
