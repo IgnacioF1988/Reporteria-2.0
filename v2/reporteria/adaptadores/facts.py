@@ -42,7 +42,7 @@ class FixtureFacts:
         out = {}
         for t in TABLAS:
             p = self._path(t)
-            out[t] = pd.read_csv(p, parse_dates=[c for c in FECHAS[t] if c in pd.read_csv(p, nrows=0).columns]) if p.exists() else pd.DataFrame()
+            out[t] = pd.read_csv(p, parse_dates=[c for c in FECHAS[t] if c in pd.read_csv(p, nrows=0).columns], low_memory=False) if p.exists() else pd.DataFrame()
         return out
 
 
