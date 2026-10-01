@@ -11,7 +11,7 @@ from reporteria.agregados import verificar
 from reporteria.config import Rutas
 from reporteria.pipeline import Opciones, correr
 
-HOJAS = ["resumen", "agregados", "alertas_resumen", "alertas", "faltantes", "plantilla_overrides", "cartera_final", "candidatos",
+HOJAS = ["resumen", "agregados", "alertas_resumen", "alertas", "faltantes", "plantilla_overrides", "plantilla_cajas", "cartera_final", "candidatos",
          "conversiones", "curvas_drop", "td_detalle", "reglas_aplicadas", "insumos"]
 
 

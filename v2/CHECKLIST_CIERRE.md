@@ -18,6 +18,7 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
 5. **Reproducibilidad**: `reporteria correr --fecha F --sin-bbg --sin-sql --sin-facts` y luego `reporteria comparar --fecha F --otro 02_OUTPUTS\F\REPORTE_F_terminal.xlsx`. Debe decir `0 diferencias` (exit 0). Si no, la caché está incompleta: revisar el log.
 6. Abrir `REPORTE_F.xlsx`:
    - `alertas_resumen`: reglas ACTIVAS con N > 0 y las estructurales con MV afectado. CRÍTICAS primero.
+   - `plantilla_cajas`: las cajas sin fila en `REGLAS/cajas`, ordenadas por MV, con sugerencia en `_Sugerencia` y `Comentario` (copiada de otro fondo, del nombre, o por moneda). Revisar, completar índice/spread/días y pegar en `REGLAS/cajas`; una fila vacía deja yield 0 a propósito y silencia `CAJA_SIN_REGLA`.
    - `plantilla_overrides`: los faltantes ordenados por MV. Completar Yield (decimal: 0.05 = 5 %) y Duration, pegar en `REGLAS/overrides_valor` con `Fecha_Desde`, y volver a correr `--sin-bbg` (no gasta terminal).
    - `agregados`: AW/DW por fondo a nivel ACTIVOS / PASIVOS / PATRIMONIO; `Cobertura` de activos por fondo.
    - `conversiones`: breakeven y XCCY/drop aplicados; `XCCY_VS_DROP` en alertas marca los swaps que difieren del drop propio.

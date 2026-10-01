@@ -340,6 +340,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         "alertas": todas.sort_values(["Severidad", "Nombre"], key=lambda s: s.map(orden_sev) if s.name == "Severidad" else s) if len(todas) else todas,
         "faltantes": faltantes[[c for c in COLS_CARTERA if c in faltantes.columns]],
         "plantilla_overrides": plantilla,
+        "plantilla_cajas": salida.plantilla_cajas(pos, reglas.cajas, rutas.settle),
         "cartera_final": pos[[c for c in COLS_CARTERA if c in pos.columns]],
         "candidatos": cand,
         "conversiones": conversiones,
