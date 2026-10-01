@@ -131,14 +131,14 @@ def escribir_csv(csv_dir: Path, dims: Dimensionales) -> None:
     csv_dir = Path(csv_dir)
     csv_dir.mkdir(parents=True, exist_ok=True)
     for nombre, df in dims.tablas().items():
-        df.to_csv(csv_dir / f"{nombre}.csv", index=False, lineterminator="\n")
+        df.to_csv(csv_dir / f"{nombre}.csv", index=False, lineterminator="\n", encoding="utf-8")
 
 
 def csv_al_dia(csv_dir: Path, dims: Dimensionales) -> bool:
     csv_dir = Path(csv_dir)
     for nombre, df in dims.tablas().items():
         p = csv_dir / f"{nombre}.csv"
-        if not p.exists() or p.read_text().replace("\r\n", "\n") != df.to_csv(index=False, lineterminator="\n"):
+        if not p.exists() or p.read_text(encoding="utf-8").replace("\r\n", "\n") != df.to_csv(index=False, lineterminator="\n"):
             return False
     return True
 

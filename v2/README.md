@@ -3,7 +3,7 @@
 Pipeline de cierre mensual que obtiene **Yield y Duration por posición (fondo × PK2 × BalanceSheet)** para
 todo el patrimonio de los fondos (renta fija, caja, fondos mutuos, pactos, facturas, derivados, equity, cuentas)
 y entrega agregados por fondo a nivel activos, pasivos y patrimonio. Reescritura desde cero del pipeline legacy
-(`../00_CODIGO`, solo referencia). Plan y decisiones: `PLAN.md`. Pendientes: `FUTURO.md`.
+(repo legacy `Reporteria-2.0/00_CODIGO`, solo referencia de lógica; v2 no lee nada de ahí). Plan y decisiones: `PLAN.md`. Pendientes: `FUTURO.md`.
 
 Diagramas de arquitectura, flujo por posición y ciclo del operador: [`docs/Reporteria_2.0_Arquitectura.pdf`](docs/Reporteria_2.0_Arquitectura.pdf)
 (se regeneran con `docs/build_diagramas.py`).
@@ -71,7 +71,7 @@ en `candidatos` con su motivo. Las posiciones hedgeadas (`Hedge_Currency` por fo
 `04_CACHE/{FECHA}/` como CSV: `bdp_{campo}_{fecha}[_override-valor].csv`, `bdh_{campo}_{fecha}.csv`,
 `bds_{campo}/{ticker}.csv`.
 
-## Estructura de carpetas (raíz = `REPORTERIA_RAIZ` o la carpeta padre del paquete)
+## Estructura de carpetas (raíz = siempre la carpeta del paquete `v2/`; solo CUBO y BIX viven fuera)
 ```
 01_INPUTS/MERCADO/    JPM_CEMBI_GBI_{FECHA}.xlsx, RA_TIR.xlsx, Carga_Indexes_{FECHA}*.csv,
                       Carga_CurvasSoberanas_{FECHA}*.csv, 4- Carga de paridades.xlsx, FACTURAS_{FECHA}.xlsx

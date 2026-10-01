@@ -72,8 +72,9 @@ def _en(dirs: list[Path], nombre: str) -> Path:
     return dirs[0] / nombre
 
 
-DIM_DEFAULT = Path(__file__).resolve().parents[1] / "dim" / "dimensionales.duckdb"     # versionado en git (REPORTERIA_DIM lo cambia)
-DATAMART_DEFAULT = Path(__file__).resolve().parents[1] / "datamart"                     # versiones publicadas, en git (REPORTERIA_DATAMART)
+RAIZ_PAQUETE = Path(__file__).resolve().parents[1]          # v2/: TODO lo que el pipeline lee o escribe vive aquí (salvo CUBO y BIX, shares externos)
+DIM_DEFAULT = RAIZ_PAQUETE / "dim" / "dimensionales.duckdb"  # versionado en git (REPORTERIA_DIM lo cambia)
+DATAMART_DEFAULT = RAIZ_PAQUETE / "datamart"                 # versiones publicadas, en git (REPORTERIA_DATAMART)
 
 
 @dataclass(frozen=True)
@@ -151,8 +152,9 @@ class Rutas:
 
     @classmethod
     def desde_env(cls, fecha: str, raiz: str | Path | None = None, fecha_ant: str | None = None) -> "Rutas":
+        """Raíz = carpeta del paquete (v2). `raiz` explícita solo para pruebas; REPORTERIA_RAIZ ya no se lee (v2 es autónomo)."""
         load_dotenv()
-        raiz = Path(raiz or os.environ.get("REPORTERIA_RAIZ") or Path(__file__).resolve().parents[1])
+        raiz = Path(raiz) if raiz else RAIZ_PAQUETE
         inp = raiz / "01_INPUTS"
         cubo_dir = Path(os.environ.get("RUTA_CUBO_DIR") or inp / "CORPORATIVO")
         bix = Path(os.environ.get("RUTA_BIX") or inp / "CORPORATIVO")

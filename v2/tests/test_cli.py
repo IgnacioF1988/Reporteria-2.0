@@ -1,4 +1,5 @@
 import shutil
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -190,3 +191,38 @@ def test_publicar_versiones_reporte_y_comparar_versiones(env_dim, monkeypatch):
     assert r.exit_code == 0 and "0 diferencias" in r.output, r.output
     r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(raiz)])
     assert "cierre 20260731: v002 REEXPRESADA" in r.output
+
+
+def test_raiz_fija_en_el_paquete_e_ignora_reporteria_raiz(monkeypatch, tmp_path):
+    from reporteria.config import RAIZ_PAQUETE, Rutas
+    for v in ("RUTA_CUBO_DIR", "RUTA_BIX", "REPORTERIA_DIM", "REPORTERIA_DATAMART"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("REPORTERIA_RAIZ", str(tmp_path))                      # ya no se lee
+    r = Rutas.desde_env("20260731")
+    assert r.raiz == RAIZ_PAQUETE
+    for ruta in (r.reglas, r.ra, r.jsonl, r.paridades, r.outputs, r.logs, r.cache, r.dim, r.datamart, r.cubo, r.bd_instr):
+        assert RAIZ_PAQUETE in Path(ruta).resolve().parents, ruta
+    assert r.reglas == RAIZ_PAQUETE / "01_INPUTS" / "MANUALES" / "REGLAS.xlsx" and r.reglas.exists()
+    assert r.jsonl.exists() and r.ra.exists() and r.paridades.exists()         # insumos versionados dentro de v2
+    from reporteria.cli import _estado_raiz
+    lineas = "\n".join(_estado_raiz(r))
+    assert "raíz" in lineas and "REPORTERIA_RAIZ ya no se usa" in lineas
+    monkeypatch.delenv("REPORTERIA_RAIZ")
+    assert "REPORTERIA_RAIZ" not in "\n".join(_estado_raiz(Rutas.desde_env("20260731")))
+
+
+def test_check_no_avisa_manuales_legacy_ya_migrados(env_dim, fixtures):
+    import pandas as pd
+    raiz = env_dim
+    manuales = raiz / "01_INPUTS" / "MANUALES"
+    shutil.copy(fixtures.parent / "corporativo" / "legacy_manuales" / "FIP.xlsx", manuales)
+    hojas = pd.read_excel(manuales / "REGLAS.xlsx", sheet_name=None)
+    c = hojas["clasificacion"]
+    c.loc[len(c)] = {**{k: None for k in c.columns}, "ID": int(c["ID"].max()) + 1, "ID_Fund": 20, "Criterio": "PK2", "Valor": "176142-38",
+                     "Bucket": "Equity", "Comentario": "migrado de FIP.xlsx: FIP ALZA Treatment Equity"}
+    with pd.ExcelWriter(manuales / "REGLAS.xlsx") as w:
+        for h, df in hojas.items():
+            df.to_excel(w, sheet_name=h, index=False)
+    r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert r.exit_code == 0, r.output
+    assert "manuales legacy sin migrar" not in r.output
