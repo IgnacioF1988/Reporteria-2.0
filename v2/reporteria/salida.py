@@ -10,7 +10,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 NAVY = "1F3864"
-COLS_CARTERA = ["Pos_ID", "ID_Fund", "Fondo", "PK2", "BalanceSheet", "Name_Instrumento", "ISIN", "Risk_Country",
+COLS_CARTERA = ["Pos_ID", "Pos_Key", "ID_Fund", "Fondo", "PK2", "PK2_Maestro", "BalanceSheet", "Name_Instrumento", "ISIN", "Risk_Country",
                 "Risk_Currency", "Moneda_PK2", "Investment_Type_Code", "Issue_Type_Code", "Coupon_Type_Code",
                 "Base_Name", "Familia", "ISIN_Hermanos", "Hedge_Currency", "Hedge_Origen", "Indice", "Overrides",
                 "BalSheetKey", "Bucket", "Bucket_Origen", "Bucket_Orden", "Ficha_FI", "Ficha_Origen", "FX_Exposure", "FX_Origen", "Tratamiento",
@@ -45,7 +45,16 @@ def comparar_carteras(a: pd.DataFrame, b: pd.DataFrame, tol: float = 1e-9) -> pd
     """Diferencias entre dos `cartera_final` por Pos_ID: solo en uno, o Yield/Duration/Fuente/Conversion distintos."""
     a, b = a.drop_duplicates("Pos_ID").set_index("Pos_ID"), b.drop_duplicates("Pos_ID").set_index("Pos_ID")
     filas = []
-    for pid in sorted(set(a.index) ^ set(b.index)):
+    solo_a, solo_b = sorted(set(a.index) - set(b.index)), sorted(set(b.index) - set(a.index))
+    if solo_a and solo_b and "Pos_Key" in a.columns and "Pos_Key" in b.columns:     # PK2 cambió de moneda: se cruza por Pos_Key
+        kb = b.loc[solo_b].drop_duplicates("Pos_Key").reset_index().set_index("Pos_Key")["Pos_ID"]
+        renombres = {pa: kb[a.at[pa, "Pos_Key"]] for pa in solo_a if a.at[pa, "Pos_Key"] in kb.index}
+        for pa, pb in renombres.items():
+            filas.append(dict(Pos_ID=pa, Campo="Pos_ID", A=pa, B=pb))
+            b = b.rename(index={pb: pa})
+        solo_a = [p for p in solo_a if p not in renombres]
+        solo_b = [p for p in solo_b if p not in renombres.values()]
+    for pid in solo_a + solo_b:
         filas.append(dict(Pos_ID=pid, Campo="Pos_ID", A="presente" if pid in a.index else "", B="presente" if pid in b.index else ""))
     comunes = a.index.intersection(b.index)
     for c in ("Yield", "Duration"):

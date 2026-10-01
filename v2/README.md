@@ -37,6 +37,8 @@ reporteria dim validar --fecha 20260731 | dim probar --fecha 20260731   # consis
 reporteria publicar --fecha 20260731 [--reexpresar --motivo "…"]  # fija la versión oficial del cierre en datamart/ (luego git add datamart && commit)
 reporteria versiones [--fecha F] | reporte --fecha F [--publicada|--version N|--conocimiento D]   # qué hay; regenerar el Excel de una versión
 reporteria comparar --fecha F --version-a 1 --version-b 2       # diferencias entre dos versiones del datamart
+reporteria maestros cargar | cambios | estado --llave PK2        # BD_INSTRUMENTOS/HOMOL bitemporales (la carga la hace `correr` solo)
+reporteria declarar --llave PK2 --columna C --valor V --desde F  # el cambio rige desde F (no es corrección retroactiva)
 ```
 El paso a paso del operador está en [`CHECKLIST_CIERRE.md`](CHECKLIST_CIERRE.md).
 Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input obligatorio o REGLAS inválido.
@@ -111,6 +113,27 @@ la última versión publicada hasta ese día. `versiones` lista todo; `comparar 
 Duration, Fuente, Conversion y Estado. El cierre anterior de una corrida se toma de la última verdad del datamart y, si no hay versión, del
 `REPORTE_{F-1}.xlsx` como antes (`resumen.anterior_version` dice cuál se usó). H9b–H9d (maestros bitemporales, impacto y re-expresión
 automática, consulta por fecha de conocimiento) están en PLAN.md §5g.
+
+## Maestros bitemporales (`v2/datamart/maestros/`)
+BD_INSTRUMENTOS y HOMOL (instrumentos y fondos) se guardan en el datamart como **base + deltas**: `maestros/base/carga=…/` (una vez)
+y `maestros/cambios/carga=YYYYMMDD_HHMMSS/cambios.parquet` con filas `(tabla, llave, columna, valor_anterior, valor_nuevo, tipo ∈ ALTA |
+CAMBIO | BAJA | RENOMBRE)`. Cada `correr` compara el BIX de hoy con el estado del datamart y, si difiere, registra una carga nueva
+(log `MAESTROS: carga … con N cambios`, alerta INFO `MAESTRO_CAMBIOS`). Sin acceso al BIX la corrida usa el estado del datamart.
+
+Dos tiempos: **conocimiento** = la carga (`correr --conocimiento YYYYMMDD` usa solo lo cargado hasta ese día) y **validez** = desde qué
+cierre rige un valor. Por defecto todo cambio es **corrección retroactiva** (vale para toda la historia; lo publicado no se toca, ver
+§Versiones). Excepción: una `BAJA` nunca es retroactiva (los cierres anteriores a su carga conservan la fila). Cuando un cambio es un hecho
+nuevo y no una corrección, el operador lo declara:
+
+```
+reporteria declarar --llave 2-1 --columna Investment_Type_Code --valor 1 --desde 20260831 [--comentario "…"]
+reporteria declarar --anular 3
+```
+La declaración queda en `datamart/declaraciones/vigencias.csv` (en git) con `valor_anterior` tomado de `maestros cambios` (o `--valor-anterior`
+si la base ya traía el valor nuevo); los cierres anteriores a `--desde` vuelven a ver el valor anterior. `maestros estado --llave PK2
+[--cierre F] [--conocimiento D]` muestra la fila como se usó; `maestros cambios [--desde D] [--llave K]` lista la historia; `maestros cargar
+[--base]` fuerza una carga (o una re-base). `Pos_Key = ID_Fund|ID_Instrumento|BalanceSheet` da continuidad entre cierres cuando el PK2 cambia
+de moneda (`IDENTIDAD_PK2`: el CUBO trae el PK2 viejo y el maestro ya tiene el nuevo; se toman los atributos de la única fila del instrumento).
 
 ## Dimensionales (`v2/dim/dimensionales.duckdb`)
 Un solo archivo DuckDB **versionado en git** es la fuente de verdad; reemplaza a `BD_BalanceSheet`, las

@@ -5,3 +5,6 @@ columnas de la cartera, `insumos/` (copias de los archivos sin fecha y hashes de
 por cierre lleva el historial (PUBLICADA, REEXPRESADA + motivo). Los borradores viven en `02_OUTPUTS/{F}/borradores/` (fuera de git);
 `reporteria publicar --fecha F` copia uno aquí. Nunca editar a mano; `reporteria reporte --fecha F [--publicada|--version N|--conocimiento D]`
 regenera el Excel y `reporteria versiones` lista lo que hay.
+
+`maestros/base/carga=…/` y `maestros/cambios/carga=…/` guardan BD_INSTRUMENTOS y HOMOL como base + deltas (los escribe `correr`;
+`reporteria maestros cambios` los lista). `declaraciones/vigencias.csv` son las declaraciones de vigencia del operador (`reporteria declarar`).

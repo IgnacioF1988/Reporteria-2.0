@@ -25,6 +25,14 @@ def leer_bd_instrumentos(path: Path) -> pd.DataFrame:
     for c in COLS_INSTR:
         if c not in df.columns:
             df[c] = None
+    return tipar_bd_instrumentos(df)
+
+
+def tipar_bd_instrumentos(df: pd.DataFrame) -> pd.DataFrame:
+    """Tipos canónicos del maestro de instrumentos (ints, Int64 en códigos, texto limpio, PK2) y una fila por PK2."""
+    df = df.copy()
+    df["ID_Instrumento"] = pd.to_numeric(df["ID_Instrumento"], errors="coerce")
+    df["SubID_Instrumento"] = pd.to_numeric(df["SubID_Instrumento"], errors="coerce")
     df = df.dropna(subset=["ID_Instrumento", "SubID_Instrumento"]).copy()
     df["ID_Instrumento"] = df["ID_Instrumento"].astype(int)
     df["SubID_Instrumento"] = df["SubID_Instrumento"].astype(int)

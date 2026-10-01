@@ -220,3 +220,90 @@ def copiar_insumos(rutas, dir_: Path, derivados: dict[str, pd.DataFrame] | None 
             hashes[nombre] = {"filas": int(len(df)), "copia": f"{nombre}.parquet"}
     (dest / "hashes.json").write_text(json.dumps(hashes, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return hashes
+
+
+# ── maestros: base + cambios por carga; declaraciones de vigencia ───────────────────────────────────────────────────────
+def id_carga(ts=None) -> str:
+    import datetime as dt
+    return (ts or dt.datetime.now()).strftime("%Y%m%d_%H%M%S")
+
+
+def dir_maestros(raiz: Path) -> Path:
+    return Path(raiz) / "maestros"
+
+
+def _cargas(dir_: Path) -> list[str]:
+    return sorted(d.name.split("=", 1)[1] for d in dir_.iterdir() if d.is_dir() and d.name.startswith("carga=")) if dir_.is_dir() else []
+
+
+def bases(raiz: Path) -> list[str]:
+    return _cargas(dir_maestros(raiz) / "base")
+
+
+def cargas_cambios(raiz: Path) -> list[str]:
+    return _cargas(dir_maestros(raiz) / "cambios")
+
+
+def escribir_base(raiz: Path, carga: str, tablas: dict[str, pd.DataFrame]) -> Path:
+    d = dir_maestros(raiz) / "base" / f"carga={carga}"
+    if d.exists():
+        raise FileExistsError(f"la base {carga} ya existe")
+    for nombre, df in tablas.items():
+        escribir_tabla(d / f"{nombre}.parquet", df)
+    return d
+
+
+def leer_base(raiz: Path, conocimiento: str | None = None) -> tuple[str | None, dict[str, pd.DataFrame]]:
+    """Última base con carga ≤ conocimiento (todas si None). (None, {}) si no hay."""
+    ids = [c for c in bases(raiz) if not conocimiento or c[:8] <= str(conocimiento)[:8]]
+    if not ids:
+        return None, {}
+    d = dir_maestros(raiz) / "base" / f"carga={ids[-1]}"
+    return ids[-1], {p.stem: leer_tabla(p) for p in sorted(d.glob("*.parquet"))}
+
+
+def escribir_cambios(raiz: Path, carga: str, cambios: pd.DataFrame) -> Path:
+    d = dir_maestros(raiz) / "cambios" / f"carga={carga}"
+    if d.exists():
+        raise FileExistsError(f"la carga de cambios {carga} ya existe")
+    return escribir_tabla(d / "cambios.parquet", cambios.assign(carga=carga))
+
+
+def leer_cambios(raiz: Path, desde_base: str | None = None, conocimiento: str | None = None) -> pd.DataFrame:
+    """Cambios con carga > base y (si se da) fecha ≤ conocimiento, en orden."""
+    from ..maestros_hist import COLS_CAMBIO
+    partes = []
+    for c in cargas_cambios(raiz):
+        if desde_base and c <= desde_base:
+            continue
+        if conocimiento and c[:8] > str(conocimiento)[:8]:
+            continue
+        p = dir_maestros(raiz) / "cambios" / f"carga={c}" / "cambios.parquet"
+        if p.exists():
+            t = leer_tabla(p)
+            if len(t):
+                partes.append(t.assign(carga=c))
+    out = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame(columns=COLS_CAMBIO)
+    for c in COLS_CAMBIO:
+        if c not in out.columns:
+            out[c] = ""
+        out[c] = out[c].astype(object).where(out[c].notna(), "").astype(str)
+    return out[COLS_CAMBIO].sort_values("carga", kind="stable").reset_index(drop=True)
+
+
+def ruta_vigencias(raiz: Path) -> Path:
+    return Path(raiz) / "declaraciones" / "vigencias.csv"
+
+
+def leer_vigencias(raiz: Path) -> pd.DataFrame:
+    from ..maestros_hist import normalizar_vigencias
+    p = ruta_vigencias(raiz)
+    return normalizar_vigencias(pd.read_csv(p, dtype=str, keep_default_na=False, encoding="utf-8") if p.exists() else None)
+
+
+def escribir_vigencias(raiz: Path, vig: pd.DataFrame) -> Path:
+    from ..maestros_hist import normalizar_vigencias
+    p = ruta_vigencias(raiz)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    normalizar_vigencias(vig).to_csv(p, index=False, lineterminator="\n", encoding="utf-8")
+    return p

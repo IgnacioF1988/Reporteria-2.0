@@ -15,7 +15,11 @@ def armar_universo(cubo: pd.DataFrame, bd_instr: pd.DataFrame, bd_funds: pd.Data
     if "ID_Instrumento" not in pos.columns:
         pos["ID_Instrumento"] = pd.to_numeric(pos["PK2"].str.split("-").str[0], errors="coerce")
     pos["Pos_ID"] = pos_id(pos)
+    pos["Pos_Key"] = pos["ID_Fund"].astype(int).astype(str) + "|" + pos["ID_Instrumento"].astype("Int64").astype(str) + "|" + limpiar_txt(pos["BalanceSheet"])
     al = []
+    pos, a = _cruce_por_id(pos, bd_instr)
+    if a is not None:
+        al.append(a)
 
     dup = pos["Pos_ID"].duplicated(keep=False)
     if dup.any():
@@ -46,6 +50,32 @@ def armar_universo(cubo: pd.DataFrame, bd_instr: pd.DataFrame, bd_funds: pd.Data
     for c in ("Fuente", "Origen", "Etapa", "Estado", "Motivo", "Yield_Moneda", "CalcType", "Estado_DEF", "Indice"):
         pos[c] = ""
     return pos.reset_index(drop=True), alertas.juntar(*al)
+
+
+def _cruce_por_id(pos: pd.DataFrame, bd_instr: pd.DataFrame):
+    """PK2 del CUBO sin fila en el maestro pero cuyo ID_Instrumento tiene UNA sola fila (SubID = moneda corregida):
+    toma los atributos de esa fila, conserva el PK2 del CUBO y avisa IDENTIDAD_PK2. Pos_Key da continuidad entre cierres."""
+    if "Risk_Currency" not in bd_instr.columns or "ID_Instrumento" not in bd_instr.columns:
+        return pos, None
+    sin = pos["Risk_Currency"].isna() | limpiar_txt(pos["Risk_Currency"]).eq("")
+    pk = limpiar_txt(pos["PK2"])
+    bien_formado = pk.str.match(r"^\d+-\d+$") & (pk.str.split("-").str[0] == pos["ID_Instrumento"].astype("Int64").astype(str))
+    sin = sin & bien_formado                                 # un PK2 malformado del CUBO ('46023') no se cruza por ID
+    if not sin.any():
+        return pos, None
+    unicos = bd_instr.groupby("ID_Instrumento").filter(lambda g: len(g) == 1).set_index("ID_Instrumento")
+    ids = pd.to_numeric(pos.loc[sin, "ID_Instrumento"], errors="coerce")
+    m = sin & ids.reindex(pos.index).isin(unicos.index)
+    if not m.any():
+        return pos, None
+    pos = pos.copy()
+    cols = [c for c in COLS_INSTR if c in unicos.columns and c not in ("ID_Instrumento",)]
+    fila = unicos.loc[pd.to_numeric(pos.loc[m, "ID_Instrumento"]).astype(int)]
+    for c in cols:
+        pos.loc[m, c] = fila[c].to_numpy()
+    pos.loc[m, "PK2_Maestro"] = fila["PK2"].to_numpy()
+    det = "PK2 del CUBO sin fila en el maestro; atributos tomados de " + fila["PK2"].astype(str)
+    return pos, alertas.emitir("IDENTIDAD_PK2", "ALTA", pos[m].assign(_det=det.to_numpy()), detalle="_det", valor="TotalMVal")
 
 
 def marcar_familias(pos: pd.DataFrame, sufijos: tuple[str, ...]) -> pd.DataFrame:
@@ -86,10 +116,13 @@ def asignar_hedge(pos: pd.DataFrame, fondos: pd.DataFrame, strong_ccy: set[str],
         al.append(alertas.emitir("HEDGE_PAIS_SIN_MONEDA", "MEDIA", pos[sin_pais], "Risk_Country sin moneda local en RISK_COUNTRY_TO_LOCAL_CCY", valor="Risk_Country"))
     con_politica = politica.ne("") & fuerte
     if cartera_ant is not None and len(cartera_ant) and "Hedge_Currency" in cartera_ant.columns:
-        prev = cartera_ant.drop_duplicates("Pos_ID").set_index("Pos_ID")["Hedge_Currency"]
-        prev = limpiar_txt(prev)
-        en_prev = pos["Pos_ID"].isin(prev.index) & con_politica
-        hedge[en_prev] = pos.loc[en_prev, "Pos_ID"].map(prev).to_numpy()
+        prev = limpiar_txt(cartera_ant.drop_duplicates("Pos_ID").set_index("Pos_ID")["Hedge_Currency"])
+        heredado = pos["Pos_ID"].map(prev)
+        if "Pos_Key" in cartera_ant.columns and "Pos_Key" in pos.columns:          # respaldo si el PK2 cambió de moneda
+            prev_k = limpiar_txt(cartera_ant.drop_duplicates("Pos_Key").set_index("Pos_Key")["Hedge_Currency"])
+            heredado = heredado.where(heredado.notna(), pos["Pos_Key"].map(prev_k))
+        en_prev = heredado.notna() & con_politica
+        hedge[en_prev] = heredado[en_prev].to_numpy()
         origen[en_prev] = "MES_ANTERIOR"
     else:
         en_prev = pd.Series(False, index=pos.index)

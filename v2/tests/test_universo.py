@@ -45,3 +45,21 @@ def test_hedge_hereda_del_cierre_anterior():
     assert out["Hedge_Currency"].tolist() == ["", "CLP"]
     assert out["Hedge_Origen"].tolist() == ["MES_ANTERIOR", "REGLA"]
     assert set(al.loc[al["Nombre"] == "HEDGE_NUEVO", "PK2"]) == {"7-1"}
+
+
+def test_cruce_por_id_cuando_el_pk2_cambio_de_moneda():
+    import pandas as pd
+    from reporteria.lectura.maestros import COLS_INSTR, tipar_bd_instrumentos
+    from reporteria.universo import armar_universo
+    bd = tipar_bd_instrumentos(pd.DataFrame([dict(ID_Instrumento=5, SubID_Instrumento=41, Name_Instrumento="BONO COP", ISIN="CO5", Risk_Currency="COP", Investment_Type_Code=1),
+                                             dict(ID_Instrumento=1, SubID_Instrumento=1, Name_Instrumento="TPL", ISIN="", Risk_Currency="USD", Investment_Type_Code=2)]
+                                            ).reindex(columns=["ID_Instrumento", "SubID_Instrumento"] + [c for c in COLS_INSTR if c not in ("ID_Instrumento", "SubID_Instrumento")]))
+    cubo = pd.DataFrame([dict(PK2="5-38", ID_Fund=20, ID_Instrumento=5, id_CURR=38, BalanceSheet="Asset", TotalMVal=100.0, LocalPrice=100.0, Qty=1, OriginalFace=1, Factor=1, AI=0, MVBook=100.0),
+                         dict(PK2="46023", ID_Fund=20, ID_Instrumento=1, id_CURR=1, BalanceSheet="Asset", TotalMVal=5.0, LocalPrice=1.0, Qty=5, OriginalFace=5, Factor=1, AI=0, MVBook=5.0)])
+    funds = pd.DataFrame({"ID_Fund": [20], "FundShortName": ["MRCLP"], "FundBaseCurrency": ["CLP"]})
+    pos, al = armar_universo(cubo, bd, funds)
+    p = pos.set_index("PK2")
+    assert p.loc["5-38", "Risk_Currency"] == "COP" and p.loc["5-38", "PK2_Maestro"] == "5-41" and p.loc["5-38", "Pos_Key"] == "20|5|Asset"
+    assert p.loc["5-38", "Pos_ID"] == "20|5-38|Asset"                                   # la identidad sigue siendo la del CUBO
+    assert pd.isna(p.loc["46023", "Risk_Currency"]) or p.loc["46023", "Risk_Currency"] == ""   # PK2 malformado: no se cruza por ID
+    assert set(al["Nombre"]) == {"IDENTIDAD_PK2", "SIN_MAESTRO"} and al[al["Nombre"].eq("IDENTIDAD_PK2")]["PK2"].tolist() == ["5-38"]

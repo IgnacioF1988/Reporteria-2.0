@@ -10,6 +10,8 @@ from .config import Rutas
 app = typer.Typer(add_completion=False, help="Yield y Duration por posición — cierre mensual")
 dim_app = typer.Typer(add_completion=False, help="Dimensionales locales (dimensionales.duckdb): importar, exportar, validar, probar")
 app.add_typer(dim_app, name="dim")
+maestros_app = typer.Typer(add_completion=False, help="Maestros bitemporales (BD_INSTRUMENTOS/HOMOL en el datamart): cargar, cambios, estado")
+app.add_typer(maestros_app, name="maestros")
 
 
 @app.command()
@@ -39,6 +41,8 @@ def check(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | N
     for linea in _estado_raiz(r):
         typer.echo(f"  {linea}")
     for linea in _estado_datamart(r):
+        typer.echo(f"  {linea}")
+    for linea in _estado_maestros(r):
         typer.echo(f"  {linea}")
     for linea in _estado_dim(r):
         typer.echo(f"  {linea}")
@@ -82,6 +86,19 @@ def _estado_datamart(r: Rutas) -> list[str]:
     if bor and not vs:
         out.append(f"[AVISO] hay {len(bor)} borrador(es) del cierre {r.fecha} sin publicar → reporteria publicar --fecha {r.fecha}")
     return out
+
+
+def _estado_maestros(r: Rutas) -> list[str]:
+    """Maestros en el datamart: base, cargas de cambios, declaraciones vigentes."""
+    from .adaptadores import datamart as DM
+    from .maestros_hist import vigentes
+    bases, cargas = DM.bases(r.datamart), DM.cargas_cambios(r.datamart)
+    if not bases:
+        return ["[opc. ] maestros: sin base en el datamart → la primera corrida la crea desde el BIX (BD_INSTRUMENTOS, HOMOL)"]
+    camb = DM.leer_cambios(r.datamart, bases[-1])
+    nv = len(vigentes(DM.leer_vigencias(r.datamart)))
+    return [f"[OK ] maestros: base {bases[-1]}, {len(cargas)} carga(s) de cambios ({len(camb)} cambios), {nv} declaración(es) vigente(s)"
+            + (f"; última carga {cargas[-1]}" if cargas else "")]
 
 
 def _estado_dim(r: Rutas) -> list[str]:
@@ -192,13 +209,14 @@ def facts_probar():
 def correr(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | None = None,
            sin_bbg: bool = typer.Option(False, "--sin-bbg", help="No consulta Bloomberg; usa caché"),
            sin_sql: bool = typer.Option(False, "--sin-sql", help="No consulta beemining; usa paridades y caché"),
+           conocimiento: str | None = typer.Option(None, help="Maestros como se conocían al YYYYMMDD (no carga el BIX de hoy)"),
            sin_facts: bool = typer.Option(False, "--sin-facts", help="No consulta la base de Facts; usa caché o FACTURAS_F.xlsx"),
            fecha_ant: str | None = typer.Option(None, help="Forzar cierre anterior YYYYMMDD")):
     """Corre el cierre completo y deja REPORTE_{FECHA}.xlsx en 02_OUTPUTS/{FECHA}."""
     from .pipeline import Opciones, correr as _correr
     r = Rutas.desde_env(fecha, raiz, fecha_ant)
     try:
-        res = _correr(r, Opciones(sin_bbg=sin_bbg, sin_sql=sin_sql, sin_facts=sin_facts))
+        res = _correr(r, Opciones(sin_bbg=sin_bbg, sin_sql=sin_sql, sin_facts=sin_facts, conocimiento=conocimiento))
     except FileNotFoundError as e:
         typer.echo(f"ERROR: {e}")
         raise typer.Exit(2)
@@ -466,6 +484,121 @@ def dim_probar(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), dim: Path
         typer.echo(f"  {f['BalanceSheet']}|{'|'.join(str(f[c]) for c in D.COLS_LLAVE[1:])}  falta {f['_Falta']:28} {int(f['_N_Posiciones']):>5} pos  {f['_TotalMVal']:>16,.0f}  ej. {f['_Ejemplo']}")
     if len(al):
         typer.echo(f"alertas: {al.groupby('Nombre').size().to_dict()}")
+
+
+# ── maestros: BD_INSTRUMENTOS / HOMOL bitemporales ─────────────────────────────────────────────────────────────────────
+@maestros_app.command("cargar")
+def maestros_cargar(base: bool = typer.Option(False, "--base", help="Escribir una base nueva desde el BIX (primera vez o re-base)"),
+                    raiz: Path | None = None):
+    """Compara el BIX de hoy con el estado del datamart y registra los cambios (normalmente lo hace `correr` solo)."""
+    import pandas as pd
+    from . import maestros_hist as MH
+    from .adaptadores import datamart as DM
+    from .lectura import maestros as M
+    r = Rutas.desde_env("00000000", raiz)
+    vivos = {}
+    if Path(r.bd_instr).exists():
+        vivos["bd_instrumentos"] = M.leer_bd_instrumentos(r.bd_instr)
+    if Path(r.homol).exists():
+        vivos["homol_instrumentos"] = M.leer_homol(r.homol)
+    if Path(r.homol_funds).exists():
+        vivos["homol_funds"] = M.leer_homol_funds(r.homol_funds)
+    if "bd_instrumentos" not in vivos:
+        typer.echo(f"BD_INSTRUMENTOS no encontrado en {r.bd_instr}")
+        raise typer.Exit(2)
+    base_id, tablas = DM.leer_base(r.datamart)
+    if base or base_id is None:
+        carga = DM.id_carga()
+        DM.escribir_base(r.datamart, carga, {t: MH.normalizar_tabla(t, vivos.get(t)) for t in MH.TABLAS})
+        typer.echo(f"base {carga} escrita: " + ", ".join(f"{t}={len(vivos.get(t, []))}" for t in MH.TABLAS) + f" → git add {r.datamart}")
+        raise typer.Exit(0)
+    camb = DM.leer_cambios(r.datamart, base_id)
+    nuevos = pd.concat([MH.diff_tablas(t, MH.estado(t, tablas.get(t), camb), vivos[t]) for t in vivos], ignore_index=True)
+    if nuevos.empty:
+        typer.echo(f"sin cambios respecto del datamart (base {base_id}, {len(camb)} cambios previos)")
+        raise typer.Exit(0)
+    carga = DM.id_carga()
+    DM.escribir_cambios(r.datamart, carga, nuevos)
+    typer.echo(f"carga {carga}: {len(nuevos)} cambios {MH.resumen_cambios(nuevos)} → git add {r.datamart}")
+
+
+@maestros_app.command("cambios")
+def maestros_cambios(desde: str | None = typer.Option(None, help="Solo cargas con fecha ≥ YYYYMMDD"),
+                     tabla: str | None = typer.Option(None), llave: str | None = typer.Option(None, help="PK2 o SourceInvestment|Source"),
+                     limite: int = typer.Option(50), raiz: Path | None = None):
+    """Lista los cambios registrados en el datamart (carga, tabla, llave, columna, antes → después, tipo)."""
+    from .adaptadores import datamart as DM
+    r = Rutas.desde_env("00000000", raiz)
+    bases = DM.bases(r.datamart)
+    if not bases:
+        typer.echo("sin base de maestros en el datamart")
+        raise typer.Exit(0)
+    c = DM.leer_cambios(r.datamart, bases[-1])
+    if desde:
+        c = c[c["carga"].str[:8] >= desde[:8]]
+    if tabla:
+        c = c[c["tabla"].eq(tabla)]
+    if llave:
+        c = c[c["llave"].str.contains(llave, regex=False)]
+    typer.echo(f"{len(c)} cambios (base {bases[-1]})")
+    for _, f in c.tail(limite).iterrows():
+        typer.echo(f"  {f['carga']}  {f['tabla']:18} {f['llave']:28} {f['columna']:22} {str(f['valor_anterior'])[:40]:40} → {str(f['valor_nuevo'])[:40]:40} {f['tipo']}")
+
+
+@maestros_app.command("estado")
+def maestros_estado(llave: str = typer.Option(..., help="PK2 (bd_instrumentos) o SourceInvestment|Source (homol)"),
+                    tabla: str = typer.Option("bd_instrumentos"), cierre: str | None = typer.Option(None, help="Como era válido en ese cierre"),
+                    conocimiento: str | None = typer.Option(None), raiz: Path | None = None):
+    """Muestra una fila del maestro: estado actual, o as-of un cierre y/o lo conocido a una fecha."""
+    from . import maestros_hist as MH
+    from .adaptadores import datamart as DM
+    r = Rutas.desde_env("00000000", raiz)
+    base_id, tablas = DM.leer_base(r.datamart, conocimiento)
+    if base_id is None:
+        typer.echo("sin base de maestros en el datamart")
+        raise typer.Exit(2)
+    camb = DM.leer_cambios(r.datamart, base_id, conocimiento)
+    t = MH.maestro_asof(tabla, tablas.get(tabla), camb, DM.leer_vigencias(r.datamart), cierre or "99991231", conocimiento)
+    k = MH.llave_txt(t, MH.LLAVES[tabla])
+    fila = t[k.eq(llave).to_numpy()]
+    if fila.empty:
+        typer.echo(f"{tabla}[{llave}] no existe" + (f" al cierre {cierre}" if cierre else "") + (f" según lo conocido al {conocimiento}" if conocimiento else ""))
+        raise typer.Exit(1)
+    for c, v in fila.iloc[0].items():
+        typer.echo(f"  {c:22} {v}")
+
+
+@app.command()
+def declarar(tabla: str = typer.Option("bd_instrumentos"), llave: str = typer.Option(None, help="PK2 o SourceInvestment|Source"),
+             columna: str = typer.Option(None), valor: str = typer.Option(None, help="Valor que rige desde el cierre"),
+             desde: str = typer.Option(None, help="Cierre YYYYMMDD desde el que rige"),
+             valor_anterior: str | None = typer.Option(None, "--valor-anterior", help="Solo si el cambio no está en `maestros cambios`"),
+             comentario: str = typer.Option(""), anular: int | None = typer.Option(None, "--anular", help="ID de la declaración a anular"),
+             raiz: Path | None = None):
+    """Declara que un cambio del maestro NO es corrección sino un hecho nuevo que rige desde un cierre (antes vale el valor anterior)."""
+    from . import maestros_hist as MH
+    from .adaptadores import datamart as DM
+    r = Rutas.desde_env("00000000", raiz)
+    vig = DM.leer_vigencias(r.datamart)
+    try:
+        if anular is not None:
+            vig = MH.anular(vig, anular)
+            DM.escribir_vigencias(r.datamart, vig)
+            typer.echo(f"declaración {anular} anulada → git add {DM.ruta_vigencias(r.datamart)}; los cierres afectados vuelven a estar sujetos a impacto")
+            raise typer.Exit(0)
+        if not all([llave, columna, valor, desde]):
+            typer.echo("faltan --llave, --columna, --valor y --desde (o use --anular ID)")
+            raise typer.Exit(2)
+        bases = DM.bases(r.datamart)
+        camb = DM.leer_cambios(r.datamart, bases[-1]) if bases else None
+        vig = MH.declarar(vig, camb, tabla, llave, columna, valor, desde, valor_anterior, comentario)
+    except ValueError as e:
+        typer.echo(f"ERROR: {e}")
+        raise typer.Exit(2)
+    DM.escribir_vigencias(r.datamart, vig)
+    f = vig.iloc[-1]
+    typer.echo(f"declaración {f['ID']}: {tabla}[{llave}].{columna} = {f['valor']} desde {f['vigente_desde']} (antes {f['valor_anterior'] or '(vacío)'}) "
+               f"→ git add {DM.ruta_vigencias(r.datamart)}")
 
 if __name__ == "__main__":
     app()

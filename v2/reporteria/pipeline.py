@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import agregados, alertas, cascada, clasificacion, datamart, dim, overrides, salida, universo
+from . import agregados, alertas, cascada, clasificacion, datamart, dim, maestros_hist as MH, overrides, salida, universo
 from .config import MAX_DIAS_ATRAS_PARIDADES, RISK_COUNTRY_TO_LOCAL_CCY, STRONG_CCY, SUFIJOS_SERIE
 from .adaptadores import datamart as DM
 from .adaptadores import dim as DIM
@@ -49,6 +49,8 @@ class Opciones:
     bbg: Bloomberg | None = None      # inyectable (tests); si None se arma según sin_bbg
     fx: FuenteFx | None = None
     facts: FuenteFacts | None = None
+    conocimiento: str | None = None   # YYYYMMDD: maestros como se conocían ese día (default: hoy)
+    sin_cargar_maestros: bool = False # no registrar en el datamart las diferencias del BIX de hoy (solo leer)
 
 
 @dataclass
@@ -64,6 +66,16 @@ class Resultado:
     alertas_resumen: pd.DataFrame = field(default_factory=pd.DataFrame)
     hojas: dict = field(default_factory=dict)
     borrador: Path | None = None
+
+
+def _desde_maestro(nombre, ruta, tabla: pd.DataFrame, source: str | None, log, al) -> pd.DataFrame | None:
+    """HOMOL desde el maestro as-of; vacío y sin archivo → INSUMO_FALTANTE como antes."""
+    t = tabla[tabla["Source"].eq(source)] if source and len(tabla) else tabla
+    if t is None or t.empty:
+        log.warning("%s: sin filas en el datamart ni archivo en %s — se omite", nombre, ruta)
+        al.append(alertas.emitir("INSUMO_FALTANTE", "ALTA", detalle=f"{nombre}: {ruta}", ambito="CORRIDA"))
+        return None
+    return t.reset_index(drop=True)
 
 
 def _opcional(nombre, ruta, lector, log, al):
@@ -127,6 +139,53 @@ def _reglas_aplicadas(pos: pd.DataFrame, reglas) -> pd.DataFrame:
     return pd.DataFrame(filas, columns=["Hoja", "ID", "Regla", "Posiciones"])
 
 
+def _maestros(rutas: Rutas, opciones: Opciones, log, al: list) -> tuple[dict[str, pd.DataFrame], dict]:
+    """BD_INSTRUMENTOS / HOMOL bitemporales: carga automática al datamart (base la primera vez, deltas después) y
+    tabla as-of del cierre según lo conocido a `opciones.conocimiento`. Sin BIX a mano se usa el estado del datamart."""
+    vivos = {}
+    if Path(rutas.bd_instr).exists():
+        vivos["bd_instrumentos"] = M.leer_bd_instrumentos(rutas.bd_instr)
+    if Path(rutas.homol).exists():
+        vivos["homol_instrumentos"] = M.leer_homol(rutas.homol)
+    if Path(rutas.homol_funds).exists():
+        vivos["homol_funds"] = M.leer_homol_funds(rutas.homol_funds)
+    raiz = rutas.datamart
+    base_id, base = DM.leer_base(raiz, opciones.conocimiento)
+    info = {"base": base_id, "carga": None, "cambios": {}, "conocimiento": opciones.conocimiento}
+    if base_id is None:
+        if "bd_instrumentos" not in vivos:
+            raise FileNotFoundError(f"Input obligatorio BD_INSTRUMENTOS no encontrado: {rutas.bd_instr} (y el datamart no tiene base de maestros)")
+        if opciones.conocimiento and DM.bases(raiz):
+            raise ValueError(f"no hay base de maestros conocida al {opciones.conocimiento} (primera: {DM.bases(raiz)[0]})")
+        carga = DM.id_carga()
+        base = {t: MH.normalizar_tabla(t, vivos.get(t)) for t in MH.TABLAS}
+        DM.escribir_base(raiz, carga, base)
+        base_id = carga
+        info["base"] = info["carga"] = carga
+        log.info("MAESTROS: base %s escrita en el datamart (%s)", carga, {t: len(df) for t, df in base.items()})
+    cambios = DM.leer_cambios(raiz, base_id, opciones.conocimiento)
+    if vivos and not opciones.sin_cargar_maestros and not opciones.conocimiento and info["carga"] is None:
+        nuevos = pd.concat([MH.diff_tablas(t, MH.estado(t, base.get(t), cambios), vivos[t]) for t in vivos], ignore_index=True)
+        if len(nuevos):
+            carga = DM.id_carga()
+            DM.escribir_cambios(raiz, carga, nuevos)
+            cambios = DM.leer_cambios(raiz, base_id, opciones.conocimiento)
+            info["carga"], info["cambios"] = carga, MH.resumen_cambios(nuevos)
+            log.info("MAESTROS: carga %s con %d cambios %s", carga, len(nuevos), info["cambios"])
+            al.append(alertas.emitir("MAESTRO_CAMBIOS", "INFO", detalle=f"carga {carga}: {info['cambios']}", ambito="CORRIDA"))
+        else:
+            log.info("MAESTROS: BIX igual al estado del datamart (base %s, %d cambios previos)", base_id, len(cambios))
+    elif not vivos:
+        log.warning("MAESTROS: BIX no accesible; se usa el estado del datamart (base %s, %d cambios)", base_id, len(cambios))
+    vig = DM.leer_vigencias(raiz)
+    tablas = {t: MH.maestro_asof(t, base.get(t), cambios, vig, rutas.fecha, opciones.conocimiento) for t in MH.TABLAS}
+    nv = int(len(MH.vigentes(vig, opciones.conocimiento)))
+    info["declaraciones"] = nv
+    log.info("MAESTROS as-of %s (conocimiento %s): %s; declaraciones vigentes %d", rutas.fecha, opciones.conocimiento or "hoy",
+             {t: len(df) for t, df in tablas.items()}, nv)
+    return tablas, info
+
+
 def _cartera_anterior(rutas: Rutas, log) -> tuple[pd.DataFrame | None, dict | None]:
     """Última verdad del cierre anterior en el datamart; si no hay versión, el REPORTE Excel de 02_OUTPUTS (como antes)."""
     v = datamart.ultima_verdad(rutas.datamart, rutas.fecha_ant)
@@ -175,7 +234,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     log = configurar_log(rutas.logs)
     log.info("Reportería | fecha=%s | raiz=%s", rutas.fecha, rutas.raiz)
     for nombre, ruta in rutas.obligatorias().items():
-        if not Path(ruta).exists():
+        if not Path(ruta).exists() and not (nombre == "BD_INSTRUMENTOS" and DM.bases(rutas.datamart)):
             raise FileNotFoundError(f"Input obligatorio {nombre} no encontrado: {ruta}")
     al: list[pd.DataFrame] = []
 
@@ -188,7 +247,8 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     fondos_validos = set(bd_funds["ID_Fund"]) | set(cubo["ID_Fund"])
     reglas = leer_reglas(rutas.reglas, fondos_validos)
     log.info("CUBO: %d filas, fondos %s", len(cubo), sorted(cubo["ID_Fund"].unique()))
-    pos, a = universo.armar_universo(cubo, M.leer_bd_instrumentos(rutas.bd_instr), bd_funds, dims.bd_monedas())
+    maestros, info_maestros = _maestros(rutas, opciones, log, al)
+    pos, a = universo.armar_universo(cubo, maestros["bd_instrumentos"], bd_funds, dims.bd_monedas())
     al.append(a)
     pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Risk_Currency", "Risk_Country", "Indice"))
     al.append(a)
@@ -213,8 +273,8 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     cands = []
     c, a = candidatos_cajas(pos, reglas.cajas, bbg, rutas.fecha); cands.append(c); al.append(a)
     rpt = _facturas(opciones, rutas, log, al)
-    homol = _opcional("HOMOL_INSTRUMENTOS", rutas.homol, lambda p: M.leer_homol(p, "GENEVA"), log, al)
-    homol_funds = _opcional("HOMOL_FUNDS", rutas.homol_funds, M.leer_homol_funds, log, al)
+    homol = _desde_maestro("HOMOL_INSTRUMENTOS", rutas.homol, maestros["homol_instrumentos"], "GENEVA", log, al)
+    homol_funds = _desde_maestro("HOMOL_FUNDS", rutas.homol_funds, maestros["homol_funds"], None, log, al)
     # El RPT puede nombrar al fondo como en HOMOL_FUNDS (MRentaCLP) o como en BD_FUNDS (MRCLP): se aceptan ambos
     mapa_fondos = {str(k).upper(): int(v) for k, v in zip(bd_funds["FundShortName"], bd_funds["ID_Fund"])}
     if homol_funds is not None:
@@ -323,7 +383,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     pos["CalcType_exportable"] = pos["CalcType"].map(yld_flag).fillna(pos["CalcType"])
 
     tot = agg[agg["Dimension"].eq("TOTAL")]
-    resumen = {"fecha": rutas.fecha, "fecha_ant": rutas.fecha_ant if ant is not None else None, "anterior_version": anterior_version, "posiciones": len(pos),
+    resumen = {"fecha": rutas.fecha, "fecha_ant": rutas.fecha_ant if ant is not None else None, "anterior_version": anterior_version, "maestros": info_maestros, "posiciones": len(pos),
                "fondos": sorted(int(x) for x in pos["ID_Fund"].unique()),
                "estado": pos["Estado"].value_counts().to_dict(),
                "fuente": pos.loc[pos["Estado"].eq("RESUELTO"), "Fuente"].value_counts().to_dict(),
@@ -371,7 +431,7 @@ def _escribir_borrador(rutas: Rutas, opciones: Opciones, hojas: dict, pos: pd.Da
     corrida = {"fecha": rutas.fecha, "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "estado": "BORRADOR", "motivo": "", "version": None,
                "completitud": "PARCIAL" if pendientes else "COMPLETA", "n_pendientes": pendientes,
                "opciones": {"sin_bbg": opciones.sin_bbg, "sin_sql": opciones.sin_sql, "sin_facts": opciones.sin_facts},
-               "anterior_version": anterior_version, "fecha_ant": resumen.get("fecha_ant"),
+               "anterior_version": anterior_version, "fecha_ant": resumen.get("fecha_ant"), "maestros": resumen.get("maestros"),
                "hashes": {"codigo": DM.hash_codigo(), "cubo": DM.hash_archivo(rutas.cubo), "reglas": DM.hash_archivo(rutas.reglas),
                           "dim": DM.hash_archivo(rutas.dim), "dim_importado": dims.meta.get("importado", "")},
                "resumen": {k: resumen[k] for k in ("posiciones", "estado", "fuente", "segundos") if k in resumen}}

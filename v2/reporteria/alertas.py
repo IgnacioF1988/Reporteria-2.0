@@ -95,10 +95,15 @@ def unir_anterior(pos: pd.DataFrame, ant: pd.DataFrame | None) -> pd.DataFrame:
     if ant is None or ant.empty or "Pos_ID" not in ant.columns:
         return pos
     a = ant.drop_duplicates("Pos_ID").set_index("Pos_ID")
+    ak = ant.drop_duplicates("Pos_Key").set_index("Pos_Key") if "Pos_Key" in ant.columns and "Pos_Key" in pos.columns else None
+    en = pos["Pos_ID"].isin(a.index)
     for c in COLS_ANT:
         if c in a.columns:
-            pos[f"{c}_ant"] = pos["Pos_ID"].map(pd.to_numeric(a[c], errors="coerce"))
-    pos["_en_anterior"] = pos["Pos_ID"].isin(a.index)
+            v = pos["Pos_ID"].map(pd.to_numeric(a[c], errors="coerce"))
+            if ak is not None:                                               # respaldo por ID_Instrumento si el PK2 cambió de moneda
+                v = v.where(en, pos["Pos_Key"].map(pd.to_numeric(ak[c], errors="coerce")))
+            pos[f"{c}_ant"] = v
+    pos["_en_anterior"] = en | (pos["Pos_Key"].isin(ak.index) if ak is not None else False)
     return pos
 
 

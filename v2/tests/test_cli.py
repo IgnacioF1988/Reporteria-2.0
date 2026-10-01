@@ -226,3 +226,35 @@ def test_check_no_avisa_manuales_legacy_ya_migrados(env_dim, fixtures):
     r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(raiz)])
     assert r.exit_code == 0, r.output
     assert "manuales legacy sin migrar" not in r.output
+
+
+def test_maestros_cargar_cambios_estado_y_declarar(env_dim, monkeypatch):
+    import pandas as pd
+    raiz = env_dim
+    dm = raiz / "datamart"
+    monkeypatch.setenv("REPORTERIA_DATAMART", str(dm))
+    r = runner.invoke(app, ["maestros", "cargar", "--raiz", str(raiz)])
+    assert r.exit_code == 0 and "base " in r.output and "bd_instrumentos=" in r.output, r.output
+    r = runner.invoke(app, ["maestros", "cargar", "--raiz", str(raiz)])
+    assert r.exit_code == 0 and "sin cambios" in r.output
+    bix = raiz / "01_INPUTS" / "CORPORATIVO" / "BD_INSTRUMENTOS.xlsx"
+    bd = pd.read_excel(bix)
+    bd.loc[0, "Risk_Currency"] = "ZZZ"
+    pk = f"{int(bd.loc[0, 'ID_Instrumento'])}-{int(bd.loc[0, 'SubID_Instrumento'])}"
+    bd.to_excel(bix, index=False)
+    r = runner.invoke(app, ["maestros", "cargar", "--raiz", str(raiz)])
+    assert r.exit_code == 0 and "1 cambios" in r.output, r.output
+    r = runner.invoke(app, ["maestros", "cambios", "--raiz", str(raiz), "--llave", pk])
+    assert r.exit_code == 0 and "Risk_Currency" in r.output and "ZZZ" in r.output
+    r = runner.invoke(app, ["maestros", "estado", "--raiz", str(raiz), "--llave", pk])
+    assert r.exit_code == 0 and "ZZZ" in r.output
+    r = runner.invoke(app, ["declarar", "--raiz", str(raiz), "--llave", pk, "--columna", "Risk_Currency", "--valor", "ZZZ", "--desde", "20260831"])
+    assert r.exit_code == 0 and "declaración 1" in r.output and (dm / "declaraciones" / "vigencias.csv").exists(), r.output
+    r = runner.invoke(app, ["maestros", "estado", "--raiz", str(raiz), "--llave", pk, "--cierre", "20260731"])
+    assert r.exit_code == 0 and "ZZZ" not in r.output
+    r = runner.invoke(app, ["declarar", "--raiz", str(raiz), "--llave", pk, "--columna", "Risk_Currency", "--valor", "QQQ", "--desde", "20260831"])
+    assert r.exit_code == 2 and "--valor-anterior" in r.output
+    r = runner.invoke(app, ["declarar", "--raiz", str(raiz), "--anular", "1"])
+    assert r.exit_code == 0 and "anulada" in r.output
+    r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert "maestros: base" in r.output and "1 carga(s) de cambios (1 cambios), 0 declaración(es)" in r.output, r.output
