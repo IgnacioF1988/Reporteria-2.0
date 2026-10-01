@@ -37,6 +37,7 @@ def env_dim(raiz_produccion, monkeypatch):
     for v in ("RUTA_CUBO_DIR", "RUTA_BIX", "REPORTERIA_RAIZ"):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("REPORTERIA_DIM", str(raiz_produccion / "dim" / "dimensionales.duckdb"))
+    monkeypatch.setenv("REPORTERIA_DATAMART", str(raiz_produccion / "datamart"))        # nunca el datamart real del repo
     return raiz_produccion
 
 
