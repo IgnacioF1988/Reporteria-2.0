@@ -11,7 +11,7 @@ from reporteria.agregados import verificar
 from reporteria.config import Rutas
 from reporteria.pipeline import Opciones, correr
 
-HOJAS = ["resumen", "agregados", "alertas_resumen", "alertas", "faltantes", "plantilla_overrides", "plantilla_cajas", "plantilla_dim", "cartera_final", "candidatos",
+HOJAS = ["resumen", "agregados", "alertas_resumen", "alertas", "faltantes", "plantilla_overrides", "plantilla_cajas", "plantilla_dim", "pendientes", "cartera_final", "candidatos",
          "conversiones", "curvas_drop", "td_detalle", "reglas_aplicadas", "insumos"]
 
 
@@ -47,7 +47,7 @@ def test_corrida_completa_y_segunda_con_cierre_anterior(fixtures, tmp_path):
     xl = pd.ExcelFile(res.excel)
     assert xl.sheet_names == HOJAS
     pl = xl.parse("plantilla_overrides")
-    assert len(pl) == (pos["Estado"] == "FALTANTE").sum() and list(pl.columns[:5]) == ["ID_Fund", "ID_Instrumento", "SubID_Instrumento", "Yield", "Duration"]
+    assert len(pl) == pos["Estado"].isin(["FALTANTE", "PENDIENTE_TERMINAL"]).sum() and list(pl.columns[:5]) == ["ID_Fund", "ID_Instrumento", "SubID_Instrumento", "Yield", "Duration"]
     assert pl["_TotalMVal"].abs().is_monotonic_decreasing
     ins = xl.parse("insumos")
     assert (ins.loc[ins["Insumo"] == "CUBO", "Estado"] == "OK").all() and (ins["Estado"].isin(["OK", "OPCIONAL_AUSENTE"])).all()

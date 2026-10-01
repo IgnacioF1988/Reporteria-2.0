@@ -51,6 +51,8 @@ class Opciones:
     facts: FuenteFacts | None = None
     conocimiento: str | None = None   # YYYYMMDD: maestros como se conocían ese día (default: hoy)
     sin_cargar_maestros: bool = False # no registrar en el datamart las diferencias del BIX de hoy (solo leer)
+    facturas: pd.DataFrame | None = None   # facturas_al_cierre ya calculadas (re-expresión desde insumos/ de una versión)
+    motivo: str = ""                  # re-expresión: por qué (queda en corrida.json)
 
 
 @dataclass
@@ -88,6 +90,9 @@ def _opcional(nombre, ruta, lector, log, al):
 
 def _facturas(opciones: Opciones, rutas: Rutas, log, al) -> pd.DataFrame | None:
     """Base de Facts (caché → túnel) y, si no hay tablas, el RPT en Excel; sin nada → INSUMO_FALTANTE."""
+    if opciones.facturas is not None:
+        log.info("FACTURAS: %d filas inyectadas (insumos de la versión publicada)", len(opciones.facturas))
+        return opciones.facturas
     tablas = {}
     try:
         tablas = _facts(opciones, rutas).tablas(rutas.fecha)
@@ -334,6 +339,10 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
 
     pos, cand, a = cascada.elegir(pos, cand, defaulted, reglas.defaulteados, rutas.settle, yt_default, reglas.parametros)
     al.append(a)
+    pos, a = cascada.marcar_pendientes_terminal(pos, getattr(bbg, "sin_cache", []), rutas.fecha)
+    if (n := int(pos["Estado"].eq("PENDIENTE_TERMINAL").sum())):
+        log.warning("PENDIENTE_TERMINAL: %d posiciones sin caché Bloomberg al %s (ver hoja pendientes; recalcular --con-terminal)", n, rutas.fecha)
+    al.append(a)
 
     # ── H4: índice, conversión a moneda del fondo (breakeven / XCCY / drop) y overrides de valor ──
     pos, a = asignar_indice(pos, bbg, rutas.fecha); al.append(a)
@@ -367,7 +376,8 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     if len(inconsistencias):
         al_inc = alertas.emitir("AGREGADO_INCONSISTENTE", "CRITICA", detalle="; ".join(inconsistencias["Problema"].astype(str)), ambito="CORRIDA")
         todas = alertas.juntar(todas, al_inc)
-    faltantes = pos[pos["Estado"].eq("FALTANTE")]
+    faltantes = pos[pos["Estado"].isin(["FALTANTE", "PENDIENTE_TERMINAL"])]
+    pendientes = pos.loc[pos["Estado"].eq("PENDIENTE_TERMINAL"), ["Pos_ID", "ID_Fund", "Fondo", "PK2", "Name_Instrumento", "ISIN", "Bucket", "TotalMVal", "Pedido_BBG", "Motivo"]]
     plantilla = pd.DataFrame({
         "ID_Fund": faltantes["ID_Fund"].values, "ID_Instrumento": faltantes["ID_Instrumento"].values,
         "SubID_Instrumento": faltantes["SubID_Instrumento"].values, "Yield": float("nan"), "Duration": float("nan"),
@@ -407,6 +417,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         "plantilla_overrides": plantilla,
         "plantilla_cajas": salida.plantilla_cajas(pos, reglas.cajas, rutas.settle),
         "plantilla_dim": dim.plantilla_sin_dim(pos),
+        "pendientes": pendientes,
         "cartera_final": pos[[c for c in COLS_CARTERA if c in pos.columns]],
         "candidatos": cand,
         "conversiones": conversiones,
@@ -428,7 +439,7 @@ def _escribir_borrador(rutas: Rutas, opciones: Opciones, hojas: dict, pos: pd.Da
     ts = time.strftime("%Y%m%d_%H%M%S")
     dir_ = rutas.borradores / f"borrador_{ts}"
     pendientes = int(pos["Estado"].eq("PENDIENTE_TERMINAL").sum()) if "Estado" in pos.columns else 0
-    corrida = {"fecha": rutas.fecha, "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "estado": "BORRADOR", "motivo": "", "version": None,
+    corrida = {"fecha": rutas.fecha, "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "estado": "BORRADOR", "motivo": opciones.motivo, "version": None,
                "completitud": "PARCIAL" if pendientes else "COMPLETA", "n_pendientes": pendientes,
                "opciones": {"sin_bbg": opciones.sin_bbg, "sin_sql": opciones.sin_sql, "sin_facts": opciones.sin_facts},
                "anterior_version": anterior_version, "fecha_ant": resumen.get("fecha_ant"), "maestros": resumen.get("maestros"),

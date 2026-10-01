@@ -37,10 +37,11 @@ def test_bbg_y_cshf_sobre_la_muestra(fixtures, tmp_path):
     assert pos["Yield_XCCY"].notna().sum() >= 10
     assert not (pos["Yield_XCCY"].notna() & ~hedged).any()
     assert (pos["CalcType_exportable"][pos["Fuente"] == "BBG"] == "YTW").all()
-    rf = pos[(pos["Bucket"] == "Fixed Income") & (pos["Estado"] == "FALTANTE")]
+    rf = pos[(pos["Bucket"] == "Fixed Income") & pos["Estado"].isin(["FALTANTE", "PENDIENTE_TERMINAL"])]
     assert len(rf) < 70, len(rf)
     # lo que sigue faltante con ISIN en caché es exactamente lo que la sanidad descartó (bonos vencidos / yields absurdas)
-    en_cache = pd.read_csv(Path(fixtures) / "bbg_cache" / "bdp_YAS_BOND_YLD_20260731_settle_dt-20260731.csv")["ticker"]
+    cache = pd.read_csv(Path(fixtures) / "bbg_cache" / "bdp_YAS_BOND_YLD_20260731_settle_dt-20260731.csv")
+    en_cache = cache.loc[pd.to_numeric(cache["valor"], errors="coerce").notna(), "ticker"]          # con valor (las filas vacías son "sin dato")
     en_cache = set(en_cache.str.replace("@BGN", "", regex=False).str.replace(" Corp", "", regex=False))
     falt_cache = rf[rf["ISIN"].isin(en_cache)]
     descartados = set(res.candidatos[(res.candidatos["Fuente"] == "BBG") & ~res.candidatos["Valido"]]["Pos_ID"])

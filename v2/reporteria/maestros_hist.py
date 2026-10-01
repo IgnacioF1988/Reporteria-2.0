@@ -219,3 +219,14 @@ def resumen_cambios(cambios: pd.DataFrame) -> dict[str, int]:
     if cambios is None or cambios.empty:
         return {}
     return {f"{t}:{k}": int(n) for (t, k), n in cambios.groupby(["tabla", "tipo"]).size().items()}
+
+
+def desde_datamart(raiz, cierre: str, conocimiento: str | None = None) -> dict[str, pd.DataFrame]:
+    """Las tres tablas as-of `cierre` según lo conocido a `conocimiento`, leyendo solo el datamart (sin BIX)."""
+    from .adaptadores import datamart as DM
+    base_id, base = DM.leer_base(raiz, conocimiento)
+    if base_id is None:
+        return {}
+    cambios = DM.leer_cambios(raiz, base_id, conocimiento)
+    vig = DM.leer_vigencias(raiz)
+    return {t: maestro_asof(t, base.get(t), cambios, vig, cierre, conocimiento) for t in TABLAS}

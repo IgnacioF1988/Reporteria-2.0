@@ -26,9 +26,14 @@ def raiz_produccion(tmp_path, fixtures):
         shutil.copy(fixtures / f, corp / "DIMENSIONALES")
     shutil.copy(fixtures / "dimensionales.duckdb", tmp_path / "dim")            # construido por conftest desde esos mismos BD_*
     shutil.copy(fixtures / "REGLAS.xlsx", manuales)
-    shutil.copy(fixtures / "FACTURAS_20260731.xlsx", mercado)
-    for f in (fixtures / "bbg_cache").glob("*.csv"):
-        shutil.copy(f, tmp_path / "04_CACHE" / "20260731")
+    for f in fixtures.glob("EXCEPCIONES*.xlsx"):
+        shutil.copy(f, manuales)
+    shutil.copy(fixtures / "fx_beemining_20260731.csv", tmp_path / "04_CACHE" / "20260731")
+    for f in ("FACTURAS_20260731.xlsx", "JPM_CEMBI_GBI_20260731.xlsx", "RA_TIR.xlsx", "4- Carga de paridades.xlsx",
+              "Carga_Indexes_20260731_20260810.csv", "Carga_CurvasSoberanas_20260731_20260810.csv"):
+        shutil.copy(fixtures / f, mercado)
+    shutil.copy(fixtures / "bond_schedule.jsonl", tmp_path / "01_INPUTS" / "GENEVA")
+    shutil.copytree(fixtures / "bbg_cache", tmp_path / "04_CACHE" / "20260731", dirs_exist_ok=True)     # bdp/bdh y carpetas bds
     return tmp_path
 
 
@@ -259,3 +264,43 @@ def test_maestros_cargar_cambios_estado_y_declarar(env_dim, monkeypatch):
     assert r.exit_code == 0 and "anulada" in r.output
     r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(raiz)])
     assert "maestros: base" in r.output and "1 carga(s) de cambios (1 cambios), 0 declaración(es)" in r.output, r.output
+
+
+def test_impacto_recalcular_pendientes_y_correr_sin_recalcular(env_dim, monkeypatch, fixtures):
+    import pandas as pd
+    raiz = env_dim
+    dm = raiz / "datamart"
+    monkeypatch.setenv("REPORTERIA_DATAMART", str(dm))
+    r = runner.invoke(app, ["impacto", "--raiz", str(raiz)])
+    assert r.exit_code == 0 and "sin impacto" in r.output
+    r = runner.invoke(app, ["correr", "--fecha", "20260731", "--raiz", str(raiz), "--sin-bbg", "--sin-sql", "--sin-facts"])
+    assert r.exit_code in (0, 1) and "siguen vigentes" in r.output or "impacto" in r.output, r.output
+    r = runner.invoke(app, ["publicar", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert r.exit_code == 0, r.output
+    r = runner.invoke(app, ["pendientes", "--raiz", str(raiz)])
+    assert r.exit_code == 0 and "0 pendientes" in r.output
+    bix = raiz / "01_INPUTS" / "CORPORATIVO" / "BD_INSTRUMENTOS.xlsx"
+    bd = pd.read_excel(bix)
+    cubo = pd.read_excel(raiz / "01_INPUTS" / "CORPORATIVO" / "CUBO_20260731.xlsx")
+    eq = bd[bd["Investment_Type_Code"].eq(2) & bd["ISIN"].astype(str).str.len().gt(5) & bd["PK2"].isin(cubo["PK2"])].iloc[0] if "PK2" in bd.columns else None
+    if eq is None:
+        bd["_pk"] = bd["ID_Instrumento"].astype(int).astype(str) + "-" + bd["SubID_Instrumento"].astype(int).astype(str)
+        eq = bd[bd["Investment_Type_Code"].eq(2) & bd["ISIN"].astype(str).str.len().gt(5) & bd["_pk"].isin(cubo["PK2"].astype(str))].iloc[0]
+        bd = bd.drop(columns="_pk")
+    m = (bd["ID_Instrumento"] == eq["ID_Instrumento"]) & (bd["SubID_Instrumento"] == eq["SubID_Instrumento"])
+    bd.loc[m, ["Investment_Type_Code", "Issue_Type_Code", "Issuer_Type_Code", "Coupon_Type_Code", "Rank_Code"]] = [1, 3, 1, 1, 2]
+    bd.to_excel(bix, index=False)
+    r = runner.invoke(app, ["correr", "--fecha", "20260731", "--raiz", str(raiz), "--sin-bbg", "--sin-sql", "--sin-facts", "--sin-recalcular"])
+    assert r.exit_code in (0, 1) and "impacto 20260731 v001: CLASIFICACION" in r.output and "se re-expresa con `publicar --reexpresar" in r.output, r.output
+    r = runner.invoke(app, ["impacto", "--raiz", str(raiz), "--detalle"])
+    assert r.exit_code == 1 and "CLASIFICACION" in r.output and "Investment_Type_Code" in r.output
+    r = runner.invoke(app, ["recalcular", "--fecha", "20260731", "--raiz", str(raiz), "--motivo", "equity a FI"])
+    assert r.exit_code == 0 and "v002 REEXPRESADA" in r.output and "PARCIAL" in r.output, r.output
+    r = runner.invoke(app, ["pendientes", "--fecha", "20260731", "--raiz", str(raiz)])
+    import re
+    assert r.exit_code == 1 and int(re.search(r"(\d+) pendientes", r.output).group(1)) >= 1       # el instrumento puede estar en más de un fondo
+    assert "YAS_BOND_YLD" in r.output and "--con-terminal" in r.output
+    r = runner.invoke(app, ["versiones", "--fecha", "20260731", "--raiz", str(raiz)])
+    assert "v002  REEXPRESADA  PARCIAL" in r.output and "equity a FI" in r.output
+    r = runner.invoke(app, ["impacto", "--raiz", str(raiz)])
+    assert r.exit_code == 0

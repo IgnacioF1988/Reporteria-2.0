@@ -161,3 +161,49 @@ def test_respuesta_bds_vacia_se_cachea_y_se_relee_sin_error(tmp_path):
     assert bbg.bds("Z Corp", "DES_CASH_FLOW", SETTLE_DT="20260731").empty
     assert bbg.bds("Z Corp", "DES_CASH_FLOW", SETTLE_DT="20260731").empty and inner.n == 1     # relee el vacío sin preguntar
     assert FixtureBloomberg(tmp_path, "20260731").bds("Z Corp", "DES_CASH_FLOW").empty
+
+
+def test_fixture_registra_lo_que_no_esta_en_cache_y_cache_persiste_los_sin_dato(tmp_path):
+    import pandas as pd
+    from reporteria.adaptadores.bbg import CacheBloomberg, FixtureBloomberg
+    fx = FixtureBloomberg(tmp_path, "20260731")
+    assert fx.bdp(["A Corp"], "YAS_BOND_YLD", settle_dt="20260731").empty
+    assert fx.sin_cache == [{"tipo": "bdp", "campo": "YAS_BOND_YLD", "ticker": "A Corp", "overrides": {"settle_dt": "20260731"}}]
+
+    class Inner:
+        caida = False
+
+        def bdp(self, tickers, campo, **ov):
+            return pd.Series({"A Corp": 5.0})          # B Corp sin respuesta
+
+        def bds(self, ticker, campo, **ov):
+            return pd.DataFrame({"x": [1]})
+    c = CacheBloomberg(Inner(), tmp_path, "20260731")
+    r = c.bdp(["A Corp", "B Corp"], "YAS_BOND_YLD", settle_dt="20260731")
+    assert r["A Corp"] == 5.0 and pd.isna(r["B Corp"]) and not c.sin_cache
+    fx2 = FixtureBloomberg(tmp_path, "20260731")
+    r2 = fx2.bdp(["A Corp", "B Corp", "C Corp"], "YAS_BOND_YLD", settle_dt="20260731")
+    assert pd.isna(r2["B Corp"]) and "C Corp" not in r2.index
+    assert [e["ticker"] for e in fx2.sin_cache] == ["C Corp"]                      # B es "sin dato" conocido; C no se preguntó
+    # curvas con override: nombre fechado, y el nombre viejo sirve de respaldo de lectura
+    c.bds("YCSW0023 Index", "CURVE_TENOR_RATES", CURVE_DATE="20260731")
+    assert (tmp_path / "bds_CURVE_TENOR_RATES" / "YCSW0023 Index__CURVE_DATE-20260731.csv").exists()
+    (tmp_path / "bds_CURVE_TENOR_RATES" / "VIEJA Index.csv").write_text("x\n2\n")
+    assert fx2.bds("VIEJA Index", "CURVE_TENOR_RATES", CURVE_DATE="20260731")["x"].tolist() == [2]
+    assert fx2.bds("NADA Index", "CURVE_TENOR_RATES", CURVE_DATE="20260731").empty and fx2.sin_cache[-1]["ticker"] == "NADA Index"
+
+
+def test_terminal_caida_no_persiste_sin_dato_y_marca_sin_cache(tmp_path):
+    import pandas as pd
+    from reporteria.adaptadores.bbg import CacheBloomberg
+
+    class Caida:
+        caida = True
+
+        def bdp(self, tickers, campo, **ov):
+            return pd.Series(dtype=float)
+    c = CacheBloomberg(Caida(), tmp_path, "20260731")
+    assert c.bdp(["A Corp"], "YAS_MOD_DUR", settle_dt="20260731").empty
+    assert c.sin_cache[0]["ticker"] == "A Corp"
+    archivo = list(tmp_path.glob("bdp_YAS_MOD_DUR_*.csv"))
+    assert not archivo or pd.read_csv(archivo[0]).empty

@@ -35,3 +35,22 @@ def test_def_pisa_al_proveedor_y_usa_parametros():
     assert o.loc["20|7-1|Asset", "Fuente"] == "JPM"
     out, _, _ = elegir(pos, cand, None, reglas_def, pd.Timestamp("2026-07-31"), parametros={"duracion_def": 0, "yield_def": 0})
     assert out.set_index("Pos_ID").loc["16|441-1|Asset", "Duration"] == 0
+
+
+def test_marcar_pendientes_terminal_solo_faltantes_con_pedido_sin_cache():
+    import pandas as pd
+    from reporteria.cascada import marcar_pendientes_terminal
+    pos = pd.DataFrame([dict(Pos_ID="20|1-1|Asset", PK2="1-1", ISIN="XS1", ISIN_Hermanos="", Estado="FALTANTE", Tratamiento="CASCADA", Motivo="sin candidato", TotalMVal=10.0),
+                        dict(Pos_ID="20|2-1|Asset", PK2="2-1", ISIN="XS2", ISIN_Hermanos="", Estado="FALTANTE", Tratamiento="CASCADA", Motivo="sin candidato", TotalMVal=10.0),
+                        dict(Pos_ID="20|3-1|Asset", PK2="3-1", ISIN="XS3", ISIN_Hermanos="XS9", Estado="RESUELTO", Tratamiento="CASCADA", Motivo="", TotalMVal=10.0),
+                        dict(Pos_ID="20|4-1|Asset", PK2="4-1", ISIN="", ISIN_Hermanos="", Estado="FALTANTE", Tratamiento="CASCADA", Motivo="sin candidato", TotalMVal=10.0)])
+    sin_cache = [dict(tipo="bdp", campo="YAS_BOND_YLD", ticker="XS1 Corp", overrides={"settle_dt": "20260731"}),
+                 dict(tipo="bdp", campo="YAS_MOD_DUR", ticker="XS1@BGN Corp", overrides={"settle_dt": "20260731"}),
+                 dict(tipo="bdp", campo="YAS_BOND_YLD", ticker="XS3 Corp", overrides={"settle_dt": "20260731"}),
+                 dict(tipo="bdp", campo="PX_LAST", ticker="XS2 Corp", overrides={})]
+    out, al = marcar_pendientes_terminal(pos, sin_cache, "20260731")
+    assert out["Estado"].tolist() == ["PENDIENTE_TERMINAL", "FALTANTE", "RESUELTO", "FALTANTE"]
+    assert out.loc[0, "Pedido_BBG"] == "XS1 Corp: YAS_BOND_YLD settle_dt=20260731; XS1@BGN Corp: YAS_MOD_DUR settle_dt=20260731"
+    assert out.loc[0, "Motivo"].startswith("SIN_CACHE_BBG") and al["Nombre"].tolist() == ["PENDIENTE_TERMINAL"]
+    out2, al2 = marcar_pendientes_terminal(pos, [], "20260731")
+    assert out2["Estado"].tolist() == pos["Estado"].tolist() and al2.empty

@@ -16,7 +16,7 @@ COLS_CARTERA = ["Pos_ID", "Pos_Key", "ID_Fund", "Fondo", "PK2", "PK2_Maestro", "
                 "BalSheetKey", "Bucket", "Bucket_Origen", "Bucket_Orden", "Ficha_FI", "Ficha_Origen", "FX_Exposure", "FX_Origen", "Tratamiento",
                 "Yield", "Duration", "Yield_Moneda", "Conversion", "Yield_Papel", "Duration_Papel", "Yield_XCCY", "Yield_Drop",
                 "Dif_XCCY_Drop_bps", "Indice_Origen", "Extrapolado", "Fuente", "Origen", "Etapa", "Estado", "Estado_DEF", "CalcType",
-                "CalcType_exportable", "Motivo", "TotalMVal", "MVBook", "AI", "LocalPrice", "Qty", "Factor"]
+                "CalcType_exportable", "Motivo", "Pedido_BBG", "TotalMVal", "MVBook", "AI", "LocalPrice", "Qty", "Factor"]
 
 
 def _formatear(ws, pct_cols: set[str]):

@@ -23,7 +23,7 @@ def test_corrida_muestra(rutas, bbg, fx):
     for (fid, bs), mv in cubo.groupby(["ID_Fund", "BalanceSheet"])["TotalMVal"].sum().items():
         assert abs(pos[(pos["ID_Fund"] == fid) & (pos["BalanceSheet"] == bs)]["TotalMVal"].sum() - mv) < 1e-4
     assert pos["Bucket"].ne("").all() and pos["Tratamiento"].ne("").all()
-    assert set(pos["Estado"]) <= {"RESUELTO", "FALTANTE", "EXCLUIDO"}
+    assert set(pos["Estado"]) <= {"RESUELTO", "FALTANTE", "PENDIENTE_TERMINAL", "EXCLUIDO"}
     ok = pos[pos["Estado"] == "RESUELTO"]
     assert ok["Yield"].notna().all() and ok["Duration"].notna().all() and ok["Yield"].between(-0.5, 1).all()
 
@@ -89,7 +89,7 @@ def test_corrida_muestra(rutas, bbg, fx):
     assert _fila(pos, "527-1", 20)["Fuente"] == "EXCEPCIONES"                             # BAUZA LOAN, flujos del PM
     assert (pos["Origen"].str.startswith("HERMANO:")).any()
     assert (pos["Fuente"] == "BBG").sum() >= 85 and (pos["Fuente"] == "CSHF").sum() >= 3        # H3 desde caché legacy
-    assert (al["Nombre"] == "FALTANTE").any()                                              # lo que no está en caché
+    assert (al["Nombre"] == "FALTANTE").any() and not (al["Nombre"] == "PENDIENTE_TERMINAL").any()   # la caché mini ya trae los "sin dato": nada pendiente
 
     # Cada fuente elegida existe como candidato válido; Excel escrito
     cand = res.candidatos[res.candidatos["Valido"]]

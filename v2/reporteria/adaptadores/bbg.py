@@ -24,8 +24,19 @@ def _leer_bds(p: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _ruta_bds(dir_cache: Path, campo: str, ticker: str) -> Path:
-    return dir_cache / f"bds_{campo}" / (re.sub(r"[^A-Za-z0-9@._ -]", "_", ticker) + ".csv")
+def _ruta_bds(dir_cache: Path, campo: str, ticker: str, overrides: dict | None = None) -> Path:
+    """Con overrides (p. ej. CURVE_DATE) el nombre los incluye: la caché de curvas queda fechada y reproducible."""
+    suf = "_".join(f"{k}-{re.sub(r'[^A-Za-z0-9]', '', str(v))}" for k, v in sorted((overrides or {}).items()))
+    return dir_cache / f"bds_{campo}" / (re.sub(r"[^A-Za-z0-9@._ -]", "_", ticker) + (f"__{suf}" if suf else "") + ".csv")
+
+
+def _ruta_bds_existente(dir_cache: Path, campo: str, ticker: str, overrides: dict | None) -> Path | None:
+    """Ruta fechada si existe; si no, la antigua sin overrides (cachés anteriores a H9c), solo para leer."""
+    p = _ruta_bds(dir_cache, campo, ticker, overrides)
+    if p.exists():
+        return p
+    viejo = _ruta_bds(dir_cache, campo, ticker)
+    return viejo if overrides and viejo.exists() else None
 
 
 def _archivo(dir_cache: Path, campo: str, fecha: str, overrides: dict, tipo: str = "bdp") -> Path:
@@ -39,6 +50,12 @@ class FixtureBloomberg:
     def __init__(self, dir_cache: Path, fecha: str):
         self.dir, self.fecha = Path(dir_cache), fecha
         self.pedidos: list[tuple[str, tuple[str, ...]]] = []
+        self.sin_cache: list[dict] = []        # pedidos sin fila en caché (ni dato ni "sin dato"): hace falta terminal
+
+    def _registrar_sin_cache(self, tipo: str, campo: str, tickers, overrides: dict, presentes) -> None:
+        for t in tickers:
+            if t not in presentes:
+                self.sin_cache.append({"tipo": tipo, "campo": campo, "ticker": t, "overrides": dict(overrides)})
 
     def _leer(self, campo, overrides, tipo="bdp") -> pd.Series:
         p = _archivo(self.dir, campo, self.fecha, overrides, tipo)
@@ -52,16 +69,22 @@ class FixtureBloomberg:
     def bdp(self, tickers, campo, **overrides):
         self.pedidos.append((campo, tuple(tickers)))
         s = self._leer(campo, overrides)
+        self._registrar_sin_cache("bdp", campo, tickers, overrides, s.index)
         return s[s.index.isin(tickers)]
 
     def historico(self, tickers, campo, fecha):
         self.pedidos.append((f"{campo}@{fecha}", tuple(tickers)))
         s = self._leer(campo, {}, "bdh")
+        self._registrar_sin_cache("bdh", campo, tickers, {"fecha": fecha}, s.index)
         return s[s.index.isin(tickers)]
 
     def bds(self, ticker, campo, **overrides):
         self.pedidos.append((f"bds:{campo}", (ticker,)))
-        return _leer_bds(_ruta_bds(self.dir, campo, ticker))
+        p = _ruta_bds_existente(self.dir, campo, ticker, overrides)
+        if p is None:
+            self._registrar_sin_cache("bds", campo, [ticker], overrides, ())
+            return pd.DataFrame()
+        return _leer_bds(p)
 
 
 class CacheBloomberg(FixtureBloomberg):
@@ -71,12 +94,22 @@ class CacheBloomberg(FixtureBloomberg):
         super().__init__(dir_cache, fecha)
         self.inner = inner
 
-    def _completar(self, tickers, campo, overrides, tipo, pedir):
+    @property
+    def caida(self) -> bool:
+        return bool(getattr(self.inner, "caida", False))
+
+    def _completar(self, tickers, campo, overrides, tipo, pedir, registro):
         cache = self._leer(campo, overrides, tipo)
         faltan = [t for t in tickers if t not in cache.index]
         if faltan:
             nuevos = pedir(faltan)
             cache = pd.concat([cache, nuevos]) if len(nuevos) else cache
+            if self.caida:                                   # terminal sin sesión: no se sabe nada de lo que faltó
+                self._registrar_sin_cache(tipo, campo, faltan, registro, cache.index)
+            else:                                            # preguntado y sin respuesta = "sin dato": se guarda vacío
+                sin_dato = [t for t in faltan if t not in cache.index]
+                if sin_dato:
+                    cache = pd.concat([cache, pd.Series([float("nan")] * len(sin_dato), index=sin_dato)])
             self.dir.mkdir(parents=True, exist_ok=True)
             pd.DataFrame({"ticker": cache.index, "valor": cache.values}).to_csv(
                 _archivo(self.dir, campo, self.fecha, overrides, tipo), index=False)
@@ -84,21 +117,25 @@ class CacheBloomberg(FixtureBloomberg):
 
     def bdp(self, tickers, campo, **overrides):
         self.pedidos.append((campo, tuple(tickers)))
-        return self._completar(tickers, campo, overrides, "bdp", lambda f: self.inner.bdp(f, campo, **overrides))
+        return self._completar(tickers, campo, overrides, "bdp", lambda f: self.inner.bdp(f, campo, **overrides), overrides)
 
     def historico(self, tickers, campo, fecha):
         self.pedidos.append((f"{campo}@{fecha}", tuple(tickers)))
-        return self._completar(tickers, campo, {}, "bdh", lambda f: self.inner.historico(f, campo, fecha))
+        return self._completar(tickers, campo, {}, "bdh", lambda f: self.inner.historico(f, campo, fecha), {"fecha": fecha})
 
     def bds(self, ticker, campo, **overrides):
         self.pedidos.append((f"bds:{campo}", (ticker,)))
-        p = _ruta_bds(self.dir, campo, ticker)
-        if p.exists():
+        p = _ruta_bds_existente(self.dir, campo, ticker, overrides)
+        if p is not None:
             return _leer_bds(p)
         d = self.inner.bds(ticker, campo, **overrides)
+        if self.caida:
+            self._registrar_sin_cache("bds", campo, [ticker], overrides, ())
+            return d if d is not None else pd.DataFrame()
+        p = _ruta_bds(self.dir, campo, ticker, overrides)
         p.parent.mkdir(parents=True, exist_ok=True)
-        d.to_csv(p, index=False)          # también la respuesta vacía: evita repreguntar
-        return d
+        (d if d is not None else pd.DataFrame()).to_csv(p, index=False)          # también la respuesta vacía: evita repreguntar
+        return d if d is not None else pd.DataFrame()
 
 
 def _es_fallo_de_sesion(msg: str) -> bool:

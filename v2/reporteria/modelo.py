@@ -7,7 +7,7 @@ import pandas as pd
 CODIGOS = ["Investment_Type_Code", "Issuer_Type_Code", "Issue_Type_Code", "Coupon_Type_Code", "Rank_Code",
            "Cash_Type_Code", "Bank_Debt_Type_Code", "Fund_Type_Code"]
 TRATAMIENTOS = ("CASCADA", "CAJA", "FACTURA", "CERO", "EXCLUIR")
-ESTADOS = ("RESUELTO", "FALTANTE", "EXCLUIDO")
+ESTADOS = ("RESUELTO", "FALTANTE", "PENDIENTE_TERMINAL", "EXCLUIDO")
 CRITERIOS = ("PK2", "ID_Instrumento", "BalSheetKey", "Nombre_Regex", "Issue_Type_Code", "Investment_Type_Code")
 ESTADOS_DEF = ("DEF", "PROPDEF")
 CALC_TYPE_DEF = {"DEF": "DEF", "PROPDEF": "PROP NP"}

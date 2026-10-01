@@ -88,6 +88,42 @@ def _estado_datamart(r: Rutas) -> list[str]:
     return out
 
 
+def _impacto_tras_correr(r: Rutas, fecha: str, sin_recalcular: bool, con_terminal: bool) -> None:
+    """Tras correr: impacto de la verdad actual sobre los cierres publicados y re-expresión automática (menos el cierre actual)."""
+    from .impacto import impacto, reexpresar_impactados, resumen_impacto
+    try:
+        imp = impacto(r)
+    except Exception as e:                      # noqa: BLE001 — el impacto nunca invalida la corrida
+        typer.echo(f"impacto: no se pudo evaluar ({e})")
+        return
+    otros = imp[imp["cierre"].ne(fecha)] if len(imp) else imp
+    if imp.empty:
+        typer.echo("impacto: los cierres publicados siguen vigentes con la verdad actual")
+        return
+    for _, f in resumen_impacto(imp).iterrows():
+        typer.echo(f"  impacto {f['cierre']} v{int(f['version']):03d}: {f['consecuencia']} ×{int(f['N'])}")
+    if otros.empty:
+        typer.echo(f"  (el cierre {fecha} se re-expresa con `publicar --reexpresar --motivo` a partir de este borrador)")
+        return
+    if sin_recalcular:
+        typer.echo("  --sin-recalcular: los cierres afectados quedan sin re-expresar (reporteria recalcular --fecha F)")
+        return
+    hechos = reexpresar_impactados(r, otros, excluir={fecha}, con_terminal=con_terminal, bbg_factory=lambda rf: _bbg_para(rf, con_terminal))
+    for v in hechos:
+        typer.echo(f"  re-expresado {v.etiqueta} ({v.completitud}) → git add {r.datamart}")
+
+
+def _bbg_para(r: Rutas, con_terminal: bool):
+    from .adaptadores.bbg import CacheBloomberg, FixtureBloomberg
+    if not con_terminal:
+        return FixtureBloomberg(r.cache, r.fecha)
+    try:
+        from .adaptadores.bbg import XbbgBloomberg
+        return CacheBloomberg(XbbgBloomberg(), r.cache, r.fecha)
+    except Exception:                           # noqa: BLE001 — sin xbbg: solo caché
+        return FixtureBloomberg(r.cache, r.fecha)
+
+
 def _estado_maestros(r: Rutas) -> list[str]:
     """Maestros en el datamart: base, cargas de cambios, declaraciones vigentes."""
     from .adaptadores import datamart as DM
@@ -210,6 +246,7 @@ def correr(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | 
            sin_bbg: bool = typer.Option(False, "--sin-bbg", help="No consulta Bloomberg; usa caché"),
            sin_sql: bool = typer.Option(False, "--sin-sql", help="No consulta beemining; usa paridades y caché"),
            conocimiento: str | None = typer.Option(None, help="Maestros como se conocían al YYYYMMDD (no carga el BIX de hoy)"),
+           sin_recalcular: bool = typer.Option(False, "--sin-recalcular", help="No re-expresar automáticamente los cierres publicados con impacto"),
            sin_facts: bool = typer.Option(False, "--sin-facts", help="No consulta la base de Facts; usa caché o FACTURAS_F.xlsx"),
            fecha_ant: str | None = typer.Option(None, help="Forzar cierre anterior YYYYMMDD")):
     """Corre el cierre completo y deja REPORTE_{FECHA}.xlsx en 02_OUTPUTS/{FECHA}."""
@@ -217,6 +254,7 @@ def correr(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | 
     r = Rutas.desde_env(fecha, raiz, fecha_ant)
     try:
         res = _correr(r, Opciones(sin_bbg=sin_bbg, sin_sql=sin_sql, sin_facts=sin_facts, conocimiento=conocimiento))
+        _impacto_tras_correr(r, fecha, sin_recalcular, not sin_bbg)
     except FileNotFoundError as e:
         typer.echo(f"ERROR: {e}")
         raise typer.Exit(2)
@@ -599,6 +637,77 @@ def declarar(tabla: str = typer.Option("bd_instrumentos"), llave: str = typer.Op
     f = vig.iloc[-1]
     typer.echo(f"declaración {f['ID']}: {tabla}[{llave}].{columna} = {f['valor']} desde {f['vigente_desde']} (antes {f['valor_anterior'] or '(vacío)'}) "
                f"→ git add {DM.ruta_vigencias(r.datamart)}")
+
+
+# ── impacto y re-expresión ─────────────────────────────────────────────────────────────────────────────────────────────
+@app.command()
+def impacto(fecha: str | None = typer.Option(None, help="Solo ese cierre (default: todos los publicados)"),
+            detalle: bool = typer.Option(False, "--detalle", help="Listar posición por posición"), raiz: Path | None = None):
+    """Qué cambió desde que se publicó cada cierre (maestros, dim, REGLAS, código, insumos fechados, cadena) y a cuántas posiciones afecta."""
+    from .impacto import impacto as _imp, resumen_impacto
+    r = Rutas.desde_env(fecha or "00000000", raiz)
+    imp = _imp(r, [fecha] if fecha else None)
+    if imp.empty:
+        typer.echo("sin impacto: las versiones vigentes coinciden con la verdad actual")
+        raise typer.Exit(0)
+    for _, f in resumen_impacto(imp).iterrows():
+        typer.echo(f"  {f['cierre']} v{int(f['version']):03d}  {f['consecuencia']:14} {int(f['N']):>6}")
+    if detalle:
+        for _, f in imp.iterrows():
+            typer.echo(f"    {f['cierre']} {f['Pos_ID'] or '(cierre)':28} {f['atributo']:22} {str(f['antes'])[:30]:30} → {str(f['despues'])[:30]:30} {f['consecuencia']}")
+    typer.echo(f"re-expresar: reporteria recalcular --fecha F [--con-terminal] (o vuelve a ocurrir solo al próximo `correr`)")
+    raise typer.Exit(1)
+
+
+@app.command()
+def recalcular(fecha: str = typer.Option(..., help="Cierre YYYYMMDD publicado"),
+               motivo: str = typer.Option("", help="Qué cambió (queda en la versión)"),
+               con_terminal: bool = typer.Option(False, "--con-terminal", help="Pedir a Bloomberg lo que no está en caché (cierra pendientes)"),
+               sin_cadena: bool = typer.Option(False, "--sin-cadena", help="No re-expresar los cierres posteriores afectados"),
+               insumo: list[str] = typer.Option([], "--insumo", help="Insumo sin fecha a refrescar desde 01_INPUTS: RA_TIR, paridades, bond_schedule"),
+               refrescar_facts: bool = typer.Option(False, "--refrescar-facts", help="Volver a bajar Facts en vez de usar facturas_al_cierre de la versión"),
+               raiz: Path | None = None):
+    """Re-expresa un cierre publicado con la verdad actual y lo publica como nueva versión REEXPRESADA (y encadena los posteriores)."""
+    from .impacto import impacto as _imp, recalcular as _rec, reexpresar_impactados
+    r = Rutas.desde_env(fecha, raiz)
+    try:
+        v = _rec(r, motivo or "manual", con_terminal, set(insumo), refrescar_facts, bbg=_bbg_para(r, con_terminal))
+    except ValueError as e:
+        typer.echo(f"ERROR: {e}")
+        raise typer.Exit(2)
+    typer.echo(f"{v.etiqueta} ({v.completitud}; pendientes {v.corrida.get('n_pendientes', 0)}) → git add {r.datamart}")
+    if not sin_cadena:
+        imp = _imp(r)
+        post = imp[imp["cierre"] > fecha] if len(imp) else imp
+        for w in reexpresar_impactados(r, post, con_terminal=con_terminal, bbg_factory=lambda rf: _bbg_para(rf, con_terminal)):
+            typer.echo(f"  cadena: {w.etiqueta} ({w.completitud})")
+
+
+@app.command()
+def pendientes(fecha: str | None = typer.Option(None, help="Cierre (default: todos)"), raiz: Path | None = None):
+    """Posiciones PENDIENTE_TERMINAL de la última verdad de cada cierre y el pedido exacto a Bloomberg que las cierra."""
+    from . import datamart as DMV
+    from .adaptadores import datamart as DM
+    r = Rutas.desde_env(fecha or "00000000", raiz)
+    total = 0
+    for f in ([fecha] if fecha else DM.cierres(r.datamart)):
+        v = DMV.ultima_verdad(r.datamart, f)
+        if v is None:
+            continue
+        pos = v.posiciones()
+        pend = pos[pos["Estado"].eq("PENDIENTE_TERMINAL")] if pos is not None and "Estado" in pos.columns else pd_empty()
+        total += len(pend)
+        typer.echo(f"{v.etiqueta} ({v.completitud}): {len(pend)} pendientes")
+        for _, p in pend.iterrows():
+            typer.echo(f"  {p['Pos_ID']:28} {str(p['Name_Instrumento'])[:30]:30} {p.get('Pedido_BBG', '')}")
+    if total:
+        typer.echo("cerrar con: reporteria recalcular --fecha F --con-terminal")
+    raise typer.Exit(1 if total else 0)
+
+
+def pd_empty():
+    import pandas as pd
+    return pd.DataFrame()
 
 if __name__ == "__main__":
     app()

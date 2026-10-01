@@ -39,6 +39,7 @@ reporteria versiones [--fecha F] | reporte --fecha F [--publicada|--version N|--
 reporteria comparar --fecha F --version-a 1 --version-b 2       # diferencias entre dos versiones del datamart
 reporteria maestros cargar | cambios | estado --llave PK2        # BD_INSTRUMENTOS/HOMOL bitemporales (la carga la hace `correr` solo)
 reporteria declarar --llave PK2 --columna C --valor V --desde F  # el cambio rige desde F (no es corrección retroactiva)
+reporteria impacto [--fecha F] [--detalle] | recalcular --fecha F [--con-terminal] [--motivo "…"] | pendientes [--fecha F]
 ```
 El paso a paso del operador está en [`CHECKLIST_CIERRE.md`](CHECKLIST_CIERRE.md).
 Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input obligatorio o REGLAS inválido.
@@ -113,6 +114,24 @@ la última versión publicada hasta ese día. `versiones` lista todo; `comparar 
 Duration, Fuente, Conversion y Estado. El cierre anterior de una corrida se toma de la última verdad del datamart y, si no hay versión, del
 `REPORTE_{F-1}.xlsx` como antes (`resumen.anterior_version` dice cuál se usó). H9b–H9d (maestros bitemporales, impacto y re-expresión
 automática, consulta por fecha de conocimiento) están en PLAN.md §5g.
+
+## Impacto y re-expresión (`impacto`, `recalcular`, `pendientes`)
+Cada `correr` termina evaluando el **impacto** de la verdad actual sobre la última verdad de cada cierre publicado: atributos del
+maestro usados vs as-of hoy (consecuencia CLASIFICACION, HEDGE, FUENTE, IDENTIDAD), dimensionales re-resueltas (DIM), hojas de REGLAS
+distintas (REGLAS), hash del código (CODIGO), CUBO/JPM/curvas re-entregados (INSUMO) y cierre anterior desactualizado (CADENA). Con
+impacto, los cierres afectados (menos el que se está corriendo) se **re-expresan solos** en orden cronológico como versiones
+REEXPRESADA con motivo `auto: …`; `--sin-recalcular` lo posterga y `reporteria recalcular --fecha F [--motivo]` lo hace a mano
+(`--sin-cadena` no arrastra los posteriores; `--insumo RA_TIR|paridades|bond_schedule` refresca un insumo sin fecha, que por defecto se
+toma de la copia guardada en la versión; `--refrescar-facts` vuelve a bajar Facts). `reporteria impacto [--detalle]` lo muestra sin
+tocar nada (exit 1 si hay impacto).
+
+Sin terminal, lo que una re-expresión necesitaría pedir a Bloomberg y no está en caché queda **`PENDIENTE_TERMINAL`** (Yield/Duration
+vacíos, cuentan como sin métrica en los agregados, motivo `SIN_CACHE_BBG` y columna `Pedido_BBG` con campo, ticker y overrides) y la
+versión queda `PARCIAL`; `reporteria pendientes [--fecha F]` las lista y `recalcular --fecha F --con-terminal` las cierra. La caché
+Bloomberg guarda ahora también los "sin dato" (fila con valor vacío) para distinguirlos de lo nunca preguntado, y las curvas de drop se
+cachean con su `CURVE_DATE` en el nombre (los archivos antiguos sin fecha siguen sirviendo de respaldo de lectura). Una caché anterior a
+este cambio no trae "sin dato": la primera re-expresión sin terminal de un cierre viejo deja pendientes que una sola corrida
+`--con-terminal` resuelve y persiste.
 
 ## Maestros bitemporales (`v2/datamart/maestros/`)
 BD_INSTRUMENTOS y HOMOL (instrumentos y fondos) se guardan en el datamart como **base + deltas**: `maestros/base/carga=…/` (una vez)

@@ -105,3 +105,44 @@ def elegir(pos: pd.DataFrame, cand: pd.DataFrame, defaulted: pd.DataFrame | None
     falt = pos[pos["Estado"].eq("FALTANTE")]
     al = alertas.emitir("FALTANTE", "ALTA", falt, "sin Yield/Duration: entra al agregado a yield 0", valor="TotalMVal") if len(falt) else alertas.vacias()
     return pos, cand, al
+
+
+CAMPOS_TERMINAL = ("YAS_BOND_YLD", "YAS_YLD_MATURITY", "YAS_YLD_CALL", "YAS_YLD_AVG_LIFE", "YAS_MOD_DUR", "DES_CASH_FLOW")
+
+
+def marcar_pendientes_terminal(pos: pd.DataFrame, sin_cache: list[dict], fecha: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """FALTANTE cuyo único camino era un pedido a Bloomberg que no está en caché (ni como 'sin dato') → PENDIENTE_TERMINAL.
+
+    `sin_cache` viene del adaptador (`FixtureBloomberg.sin_cache` o `CacheBloomberg` con la terminal caída). Deja en
+    `Pedido_BBG` exactamente qué pedir (campo, ticker, overrides) para cerrar el pendiente con `recalcular --con-terminal`.
+    """
+    pos = pos.copy()
+    pos["Pedido_BBG"] = ""
+    if not sin_cache or not pos["Estado"].eq("FALTANTE").any():
+        return pos, alertas.vacias()
+    por_ticker: dict[str, list[str]] = {}
+    for e in sin_cache:
+        if e["campo"] not in CAMPOS_TERMINAL:
+            continue
+        ov = " ".join(f"{k}={v}" for k, v in sorted(e["overrides"].items()))
+        por_ticker.setdefault(str(e["ticker"]), []).append(f"{e['campo']}{' ' + ov if ov else ''}")
+    if not por_ticker:
+        return pos, alertas.vacias()
+    isin = pos["ISIN"].astype(str).str.strip()
+    hermanos = pos["ISIN_Hermanos"].astype(str) if "ISIN_Hermanos" in pos.columns else pd.Series("", index=pos.index)
+    obj = pos.index[pos["Estado"].eq("FALTANTE") & pos["Tratamiento"].eq("CASCADA") & isin.ne("")]
+    marcados = []
+    for i in obj:
+        base = isin[i]
+        tickers = [f"{base} Corp", f"{base}@BGN Corp", f"{base} Govt"] + [f"{h} Corp" for h in str(hermanos[i]).split(";") if h]
+        pedidos = sorted({f"{t}: {c}" for t in tickers if t in por_ticker for c in por_ticker[t]})
+        if pedidos:
+            pos.at[i, "Pedido_BBG"] = "; ".join(pedidos)
+            marcados.append(i)
+    if not marcados:
+        return pos, alertas.vacias()
+    pos.loc[marcados, "Estado"] = "PENDIENTE_TERMINAL"
+    pos.loc[marcados, "Motivo"] = "SIN_CACHE_BBG: " + pos.loc[marcados, "Motivo"].astype(str)
+    al = alertas.emitir("PENDIENTE_TERMINAL", "MEDIA", pos.loc[marcados], f"sin caché Bloomberg al {fecha}: correr `recalcular --con-terminal`",
+                        valor="TotalMVal")
+    return pos, al
