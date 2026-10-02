@@ -126,7 +126,7 @@ def rutas_de(rutas: Rutas, fecha: str) -> Rutas:
 
 def impacto(rutas: Rutas, cierres: list[str] | None = None, conocimiento: str | None = None) -> pd.DataFrame:
     """Impacto sobre la última verdad de cada cierre del datamart (todos, o los indicados)."""
-    todos = cierres or DM.cierres(rutas.datamart)
+    todos = cierres or DM.fechas(rutas.datamart)
     if not todos:
         return pd.DataFrame(columns=COLS_IMPACTO)
     dims = DIM.leer(rutas.dim) if Path(rutas.dim).exists() else None
@@ -137,7 +137,7 @@ def impacto(rutas: Rutas, cierres: list[str] | None = None, conocimiento: str | 
         if v is None:
             continue
         maestros = MH.desde_datamart(rutas.datamart, f, conocimiento)
-        prev = [x for x in DM.cierres(rutas.datamart) if x < f]
+        prev = [x for x in DM.fechas(rutas.datamart) if x < f]
         anterior = DMV.ultima_verdad(rutas.datamart, prev[-1]) if prev else None
         partes.append(impacto_version(rutas_de(rutas, f), v, maestros, dims, hc, anterior))
     return pd.concat(partes, ignore_index=True) if partes else pd.DataFrame(columns=COLS_IMPACTO)

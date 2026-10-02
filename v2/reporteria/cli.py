@@ -74,15 +74,18 @@ def _estado_datamart(r: Rutas) -> list[str]:
     """Datamart: cierres con versión, estado del cierre actual, borradores sin publicar."""
     from . import datamart as DMV
     from .adaptadores import datamart as DM
-    todos = DM.cierres(r.datamart)
+    todos = DM.fechas(r.datamart)
     vs = DMV.versiones_de(r.datamart, r.fecha) if r.fecha in todos else []
     bor = DMV.borradores(r.borradores, r.fecha)
     if vs:
         est = f"v{vs[-1].numero:03d} {vs[-1].estado}" + (f" ({vs[-1].completitud})" if vs[-1].completitud != "COMPLETA" else "")
     else:
         est = "sin versión publicada"
-    out = [f"[{'OK ' if todos else 'opc. '}] datamart {r.datamart}: {len(todos)} cierre(s) con versión{' (último ' + todos[-1] + ')' if todos else ''}; "
+    out = [f"[{'OK ' if todos else 'opc. '}] datamart {r.datamart} (modo {r.modo}): {len(todos)} fecha(s) con versión{' (última ' + todos[-1] + ')' if todos else ''}; "
            f"cierre {r.fecha}: {est}; borradores sin publicar: {len(bor)}"]
+    if (Path(r.datamart) / ".lock").exists():
+        out.append(f"[AVISO] datamart con candado: {(Path(r.datamart) / '.lock').read_text(encoding='utf-8')}")
+    out.append(f"[OK ] caché {r.cache}")
     if bor and not vs:
         out.append(f"[AVISO] hay {len(bor)} borrador(es) del cierre {r.fecha} sin publicar → reporteria publicar --fecha {r.fecha}")
     return out
@@ -247,13 +250,14 @@ def correr(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"), raiz: Path | 
            sin_sql: bool = typer.Option(False, "--sin-sql", help="No consulta beemining; usa paridades y caché"),
            conocimiento: str | None = typer.Option(None, help="Maestros como se conocían al YYYYMMDD (no carga el BIX de hoy)"),
            sin_recalcular: bool = typer.Option(False, "--sin-recalcular", help="No re-expresar automáticamente los cierres publicados con impacto"),
+           sin_excel: bool = typer.Option(False, "--sin-excel", help="No escribir REPORTE_F.xlsx (se genera a pedido con `reporte`)"),
            sin_facts: bool = typer.Option(False, "--sin-facts", help="No consulta la base de Facts; usa caché o FACTURAS_F.xlsx"),
            fecha_ant: str | None = typer.Option(None, help="Forzar cierre anterior YYYYMMDD")):
     """Corre el cierre completo y deja REPORTE_{FECHA}.xlsx en 02_OUTPUTS/{FECHA}."""
     from .pipeline import Opciones, correr as _correr
     r = Rutas.desde_env(fecha, raiz, fecha_ant)
     try:
-        res = _correr(r, Opciones(sin_bbg=sin_bbg, sin_sql=sin_sql, sin_facts=sin_facts, conocimiento=conocimiento))
+        res = _correr(r, Opciones(sin_bbg=sin_bbg, sin_sql=sin_sql, sin_facts=sin_facts, conocimiento=conocimiento, excel=not sin_excel))
         _impacto_tras_correr(r, fecha, sin_recalcular, not sin_bbg)
     except FileNotFoundError as e:
         typer.echo(f"ERROR: {e}")
@@ -377,7 +381,7 @@ def publicar(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"),
         typer.echo(f"borrador '{borrador}' no encontrado; disponibles: {[b.ruta.name for b in bors]}")
         raise typer.Exit(2)
     try:
-        v = DMV.publicar(r.datamart, fecha, elegido.ruta, motivo, reexpresar)
+        v = DMV.publicar(r.datamart, fecha, elegido.ruta, motivo, reexpresar, modo=r.modo)
     except ValueError as e:
         typer.echo(f"ERROR: {e}")
         raise typer.Exit(2)
@@ -690,7 +694,7 @@ def pendientes(fecha: str | None = typer.Option(None, help="Cierre (default: tod
     from .adaptadores import datamart as DM
     r = Rutas.desde_env(fecha or "00000000", raiz)
     total = 0
-    for f in ([fecha] if fecha else DM.cierres(r.datamart)):
+    for f in ([fecha] if fecha else DM.fechas(r.datamart)):
         v = DMV.ultima_verdad(r.datamart, f)
         if v is None:
             continue
@@ -708,6 +712,19 @@ def pendientes(fecha: str | None = typer.Option(None, help="Cierre (default: tod
 def pd_empty():
     import pandas as pd
     return pd.DataFrame()
+
+
+@app.command("migrar-datamart")
+def migrar_datamart(destino: Path = typer.Option(..., help="Carpeta del datamart diario en el share (REPORTERIA_DATAMART)"),
+                    origen: Path | None = typer.Option(None, help="Datamart mensual a migrar (default: el del paquete, v2/datamart)"),
+                    raiz: Path | None = None):
+    """Copia las versiones mensuales (cierres/), maestros y declaraciones al layout diario (diario/fecha=F/corrida=NNN + estado.json)."""
+    from . import datamart as DMV
+    r = Rutas.desde_env("00000000", raiz)
+    org = Path(origen) if origen else r.datamart
+    hechos = DMV.migrar_a_diario(org, destino)
+    typer.echo(f"migrado a {destino}: {hechos or 'nada nuevo'}")
+    typer.echo(f"ahora en .env: REPORTERIA_DATAMART={destino}  (y REPORTERIA_CACHE=<share>\\04_CACHE para compartir la caché)")
 
 if __name__ == "__main__":
     app()

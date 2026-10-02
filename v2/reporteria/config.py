@@ -94,6 +94,7 @@ class Rutas:
     dim: Path
     bix_dirs: tuple[Path, ...]
     datamart: Path
+    modo: str                 # "mensual" (versiones en cierres/, git) | "diario" (corridas en diario/, share)
     reglas: Path
     facturas: Path | None
     jpm: Path | None
@@ -127,7 +128,7 @@ class Rutas:
         return self.outputs.parent / self.fecha_ant / f"REPORTE_{self.fecha_ant}.xlsx" if self.fecha_ant else None
 
     @classmethod
-    def _armar(cls, fecha, raiz, cubo_dir, bix_dirs, mercado, manuales, geneva, outputs, logs, cache, fecha_ant=None, dim=None, datamart=None):
+    def _armar(cls, fecha, raiz, cubo_dir, bix_dirs, mercado, manuales, geneva, outputs, logs, cache, fecha_ant=None, dim=None, datamart=None, modo="mensual"):
         fx = []
         for d in bix_dirs:
             fx += [Path(p) for p in glob.glob(str(d / "BD_FX_Exposure_*.xlsx")) if not Path(p).name.startswith("~$")]
@@ -138,7 +139,7 @@ class Rutas:
             bd_yld_flag=_en(bix_dirs, "BD_YLD_FLAG.xlsx"), defaulted=_en(bix_dirs, "DEFAULTED.xlsx"),
             homol=_en(bix_dirs, "HOMOL_INSTRUMENTOS.xlsx"), homol_funds=_en(bix_dirs, "HOMOL_FUNDS.xlsx"),
             fx_exposure=tuple(sorted(set(fx))), dim=Path(dim) if dim else DIM_DEFAULT, bix_dirs=tuple(Path(d) for d in bix_dirs),
-            datamart=Path(datamart) if datamart else DATAMART_DEFAULT,
+            datamart=Path(datamart) if datamart else DATAMART_DEFAULT, modo=modo,
             reglas=manuales / "REGLAS.xlsx",
             facturas=_uno(str(mercado / f"FACTURAS_{fecha}*.xlsx")), jpm=_uno(str(mercado / f"JPM_CEMBI_GBI_{fecha}*.xlsx")),
             ra=mercado / "RA_TIR.xlsx", jsonl=geneva / "bond_schedule.jsonl",
@@ -159,9 +160,13 @@ class Rutas:
         cubo_dir = Path(os.environ.get("RUTA_CUBO_DIR") or inp / "CORPORATIVO")
         bix = Path(os.environ.get("RUTA_BIX") or inp / "CORPORATIVO")
         datamart = Path(os.environ.get("REPORTERIA_DATAMART") or DATAMART_DEFAULT)
+        cache = Path(os.environ.get("REPORTERIA_CACHE") or raiz / "04_CACHE") / fecha     # en el share si lo comparten servidor y estación
+        modo = (os.environ.get("REPORTERIA_MODO") or "mensual").strip().lower()
+        if modo not in ("mensual", "diario"):
+            raise ValueError(f"REPORTERIA_MODO={modo}: debe ser mensual o diario")
         return cls._armar(fecha, raiz, cubo_dir, [bix, bix / "DIMENSIONALES"], inp / "MERCADO", inp / "MANUALES",
-                          inp / "GENEVA", raiz / "02_OUTPUTS" / fecha, raiz / "03_LOGS" / fecha, raiz / "04_CACHE" / fecha,
-                          fecha_ant or _detectar_fecha_ant(raiz / "02_OUTPUTS", fecha, datamart), os.environ.get("REPORTERIA_DIM"), datamart)
+                          inp / "GENEVA", raiz / "02_OUTPUTS" / fecha, raiz / "03_LOGS" / fecha, cache,
+                          fecha_ant or _detectar_fecha_ant(raiz / "02_OUTPUTS", fecha, datamart), os.environ.get("REPORTERIA_DIM"), datamart, modo)
 
     @classmethod
     def para_pruebas(cls, fecha: str, fixtures: Path, tmp: Path) -> "Rutas":
@@ -187,7 +192,8 @@ def _detectar_fecha_ant(dir_outputs: Path, fecha: str, datamart: Path | None = N
     prev = set()
     if dir_outputs.is_dir():
         prev |= {d.name for d in dir_outputs.iterdir() if d.is_dir() and d.name.isdigit() and len(d.name) == 8}
-    if datamart is not None and (Path(datamart) / "cierres").is_dir():
-        prev |= {d.name.split("=", 1)[1] for d in (Path(datamart) / "cierres").iterdir() if d.is_dir() and d.name.startswith("cierre=")}
+    if datamart is not None:
+        from .adaptadores.datamart import fechas
+        prev |= set(fechas(datamart))
     prev = sorted(p for p in prev if p < fecha)
     return prev[-1] if prev else None

@@ -177,6 +177,7 @@ def _alertas(df, validos):
         raise ValueError(f"REGLAS/alertas: Ambito inválido {malos}; válidos {list(AMBITOS)}")
     df["Activa"] = _si_no(df, "Activa", "alertas", "SI")
     df["Requiere_Anterior"] = _si_no(df, "Requiere_Anterior", "alertas", "NO")
+    df["Bloquea_Publicacion"] = _si_no(df, "Bloquea_Publicacion", "alertas", "NO")     # H10: deja PROVISORIO al fondo-día (default NO)
     # "==" escrito en Excel se vuelve fórmula; se aceptan alias en texto
     df["Operador"] = df["Operador"].str.lower().replace({"igual": "==", "eq": "==", "=": "==", "distinto": "!=", "ne": "!=", "abs>=": "abs>=", "abs>": "abs>"})
     con_campo = df["Campo"].ne("")

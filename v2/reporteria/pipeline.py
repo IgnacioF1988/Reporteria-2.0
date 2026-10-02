@@ -53,6 +53,7 @@ class Opciones:
     sin_cargar_maestros: bool = False # no registrar en el datamart las diferencias del BIX de hoy (solo leer)
     facturas: pd.DataFrame | None = None   # facturas_al_cierre ya calculadas (re-expresión desde insumos/ de una versión)
     motivo: str = ""                  # re-expresión: por qué (queda en corrida.json)
+    excel: bool = True                # escribir REPORTE_{F}.xlsx (en modo diario se genera a pedido con `reporte`)
 
 
 @dataclass
@@ -426,7 +427,8 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         "reglas_aplicadas": reglas_aplicadas,
         "insumos": insumos,
     }
-    excel = salida.escribir_excel(hojas, rutas.excel_final)
+    excel = salida.escribir_excel(hojas, rutas.excel_final) if opciones.excel else None
+    rutas.outputs.mkdir(parents=True, exist_ok=True)
     (rutas.outputs / f"resumen_corrida_{rutas.fecha}.json").write_text(json.dumps(resumen, ensure_ascii=False, indent=2, default=str))
     borrador = _escribir_borrador(rutas, opciones, hojas, pos, resumen, anterior_version, rpt, dims, log)
     log.info("listo en %.1fs → %s", resumen["segundos"], excel)

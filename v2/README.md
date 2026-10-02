@@ -115,6 +115,13 @@ Duration, Fuente, Conversion y Estado. El cierre anterior de una corrida se toma
 `REPORTE_{F-1}.xlsx` como antes (`resumen.anterior_version` dice cuál se usó). H9b–H9d (maestros bitemporales, impacto y re-expresión
 automática, consulta por fecha de conocimiento) están en PLAN.md §5g.
 
+## Modo diario (H10, en construcción)
+`REPORTERIA_MODO=diario` activa el layout `datamart/diario/fecha=F/corrida=NNN/` + `estado.json` (estado por fondo-día), pensado para
+un datamart en el share (`REPORTERIA_DATAMART`) con caché compartida (`REPORTERIA_CACHE`). Las escrituras son atómicas (carpeta `.tmp` y
+rename; una corrida sin `corrida.json` se ignora), hay candado de escritura (`.lock`) y `reporteria migrar-datamart --destino <share>`
+copia el datamart mensual de git al share. En modo `mensual` (default) todo sigue igual. `correr --sin-excel` deja solo el borrador;
+`REGLAS/alertas.Bloquea_Publicacion` (SI/NO, default NO) se lee pero aún no actúa.
+
 ## Impacto y re-expresión (`impacto`, `recalcular`, `pendientes`)
 Cada `correr` termina evaluando el **impacto** de la verdad actual sobre la última verdad de cada cierre publicado: atributos del
 maestro usados vs as-of hoy (consecuencia CLASIFICACION, HEDGE, FUENTE, IDENTIDAD), dimensionales re-resueltas (DIM), hojas de REGLAS

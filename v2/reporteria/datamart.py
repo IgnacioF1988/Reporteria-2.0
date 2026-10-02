@@ -43,9 +43,11 @@ def _ahora() -> str:
 
 
 def versiones_de(raiz: Path, fecha: str) -> list[Version]:
+    """Versiones de una fecha en cualquiera de los dos layouts, ordenadas por número (el número es único por fecha)."""
     t = DM.listar_versiones(raiz, fecha)
     return [Version(cierre=f["cierre"], numero=int(f["version"]), ruta=Path(f["ruta"]), estado=f["estado"], motivo=f["motivo"], ts=f["ts"],
-                    completitud=f["completitud"] or "COMPLETA", corrida=DM.leer_corrida(f["ruta"])) for _, f in t.sort_values("version").iterrows()]
+                    completitud=f["completitud"] or "COMPLETA", corrida={**DM.leer_corrida(f["ruta"]), "_layout": f["layout"]})
+            for _, f in t.sort_values("version").iterrows()]
 
 
 def borradores(dir_borradores: Path, fecha: str) -> list[Version]:
@@ -80,8 +82,11 @@ def ultima_verdad(raiz: Path, fecha: str | None) -> Version | None:
     return resolver_version(raiz, fecha) if fecha else None
 
 
-def publicar(raiz: Path, fecha: str, borrador: Path, motivo: str = "", reexpresar: bool = False) -> Version:
-    """Copia el borrador al datamart como version=NNN. La primera es PUBLICADA; las siguientes exigen `reexpresar` y quedan REEXPRESADA."""
+def publicar(raiz: Path, fecha: str, borrador: Path, motivo: str = "", reexpresar: bool = False, modo: str = "mensual") -> Version:
+    """Copia el borrador al datamart como nueva versión. La primera es PUBLICADA; las siguientes exigen `reexpresar` y quedan REEXPRESADA.
+
+    `modo="mensual"`: `cierres/cierre=F/version=NNN` + publicacion.json (layout en git). `modo="diario"`: `diario/fecha=F/corrida=NNN`
+    + estado.json con todos los fondos de la corrida apuntando a ella (H10b afina el estado por fondo)."""
     corrida = DM.leer_corrida(borrador)
     if str(corrida.get("fecha", fecha)) != str(fecha):
         raise ValueError(f"el borrador es del cierre {corrida.get('fecha')}, no de {fecha}")
@@ -92,15 +97,59 @@ def publicar(raiz: Path, fecha: str, borrador: Path, motivo: str = "", reexpresa
         raise ValueError("una re-expresión necesita --motivo")
     numero = (previas[-1].numero + 1) if previas else 1
     estado = "REEXPRESADA" if previas else "PUBLICADA"
-    destino = DM.copiar_version(borrador, DM.dir_version(raiz, fecha, numero))
     ts = _ahora()
+    if modo == "diario":
+        destino = DM.copiar_version(borrador, DM.dir_corrida(raiz, fecha, numero))
+    else:
+        destino = DM.copiar_version(borrador, DM.dir_version(raiz, fecha, numero))
     corrida.update(version=numero, estado=estado, motivo=motivo, publicado_en=ts)
     DM.escribir_corrida(destino, corrida)
-    hist = DM.leer_publicacion(raiz, fecha)
-    hist.append({"version": numero, "estado": estado, "motivo": motivo, "ts": ts, "borrador": Path(borrador).name,
-                 "code_hash": corrida.get("hashes", {}).get("codigo", ""), "completitud": corrida.get("completitud", "COMPLETA")})
-    DM.escribir_publicacion(raiz, fecha, hist)
+    entrada = {"version": numero, "estado": estado, "motivo": motivo, "ts": ts, "borrador": Path(borrador).name,
+               "code_hash": corrida.get("hashes", {}).get("codigo", ""), "completitud": corrida.get("completitud", "COMPLETA")}
+    if modo == "diario":
+        est = DM.leer_estado(raiz, fecha)
+        est["corridas"][f"{numero:03d}"] = entrada
+        pos = DM.leer_posiciones(destino)
+        for fid in (sorted(int(x) for x in pos["ID_Fund"].dropna().unique()) if pos is not None else []):
+            f = est["fondos"].setdefault(str(fid), {"historial": []})
+            f["historial"].append({"corrida": numero, "estado": estado, "motivo": motivo, "ts": ts, "bloqueos": []})
+            f.update(corrida=numero, estado=estado)
+        DM.escribir_estado(raiz, fecha, est)
+    else:
+        hist = DM.leer_publicacion(raiz, fecha)
+        hist.append(entrada)
+        DM.escribir_publicacion(raiz, fecha, hist)
     return Version(cierre=fecha, numero=numero, ruta=destino, estado=estado, motivo=motivo, ts=ts, completitud=corrida.get("completitud", "COMPLETA"), corrida=corrida)
+
+
+def migrar_a_diario(origen: Path, destino: Path) -> list[str]:
+    """Copia el datamart mensual (cierres/, maestros/, declaraciones/) al layout diario en `destino` (el share). Idempotente."""
+    hechos = []
+    for f in DM.cierres(origen):
+        est = DM.leer_estado(destino, f)
+        for v in versiones_de(origen, f):
+            if v.corrida.get("_layout") == "diario":
+                continue
+            d = DM.dir_corrida(destino, f, v.numero)
+            if d.exists():
+                continue
+            DM.copiar_version(v.ruta, d)
+            est["corridas"][f"{v.numero:03d}"] = {"version": v.numero, "estado": v.estado, "motivo": v.motivo, "ts": v.ts,
+                                                   "completitud": v.completitud, "origen": "migrado de cierres/"}
+            pos = v.posiciones()
+            for fid in (sorted(int(x) for x in pos["ID_Fund"].dropna().unique()) if pos is not None else []):
+                fo = est["fondos"].setdefault(str(fid), {"historial": []})
+                fo["historial"].append({"corrida": v.numero, "estado": v.estado, "motivo": v.motivo, "ts": v.ts, "bloqueos": []})
+                fo.update(corrida=v.numero, estado=v.estado)
+            hechos.append(f"{f}/v{v.numero:03d}")
+        DM.escribir_estado(destino, f, est)
+    for sub in ("maestros", "declaraciones"):
+        o, d = Path(origen) / sub, Path(destino) / sub
+        if o.is_dir():
+            import shutil
+            shutil.copytree(o, d, dirs_exist_ok=True)
+            hechos.append(sub)
+    return hechos
 
 
 def comparar_versiones(a: Version, b: Version) -> pd.DataFrame:

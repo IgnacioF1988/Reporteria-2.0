@@ -69,15 +69,30 @@ def leer_tabla(path: Path) -> pd.DataFrame:
 
 
 def escribir_version(dir_: Path, hojas: dict[str, pd.DataFrame], corrida: dict, posiciones: pd.DataFrame | None = None) -> Path:
+    """Escritura atómica: todo va a `<dir>.tmp/`, `corrida.json` al final y rename. Una caída deja un `.tmp` que se ignora."""
     dir_ = Path(dir_)
-    dir_.mkdir(parents=True, exist_ok=True)
+    tmp = dir_.with_name(dir_.name + ".tmp")
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir(parents=True, exist_ok=True)
     for nombre, df in hojas.items():
-        escribir_tabla(dir_ / f"{nombre}.parquet", df)
+        escribir_tabla(tmp / f"{nombre}.parquet", df)
     if posiciones is not None:
-        escribir_tabla(dir_ / f"{TABLA_POSICIONES}.parquet", posiciones)
+        escribir_tabla(tmp / f"{TABLA_POSICIONES}.parquet", posiciones)
     corrida = {**corrida, "hojas": list(hojas)}
-    (dir_ / CORRIDA).write_text(json.dumps(corrida, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    (tmp / CORRIDA).write_text(json.dumps(corrida, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    if dir_.exists():
+        shutil.rmtree(dir_)
+    tmp.rename(dir_)
     return dir_
+
+
+def _json_atomico(path: Path, obj) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    tmp.replace(path)
 
 
 def leer_corrida(dir_: Path) -> dict:
@@ -85,7 +100,7 @@ def leer_corrida(dir_: Path) -> dict:
 
 
 def escribir_corrida(dir_: Path, corrida: dict) -> None:
-    (Path(dir_) / CORRIDA).write_text(json.dumps(corrida, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    _json_atomico(Path(dir_) / CORRIDA, corrida)
 
 
 def leer_version(dir_: Path) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | None, dict]:
@@ -116,44 +131,154 @@ def leer_publicacion(raiz: Path, fecha: str) -> list[dict]:
 
 
 def escribir_publicacion(raiz: Path, fecha: str, historial: list[dict]) -> None:
-    p = dir_cierre(raiz, fecha) / PUBLICACION
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(historial, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    _json_atomico(dir_cierre(raiz, fecha) / PUBLICACION, historial)
 
 
 def cierres(raiz: Path) -> list[str]:
+    """Fechas con layout mensual (`cierres/cierre=F`, versionado en git)."""
     base = Path(raiz) / "cierres"
     if not base.is_dir():
         return []
     return sorted(d.name.split("=", 1)[1] for d in base.iterdir() if d.is_dir() and d.name.startswith("cierre="))
 
 
+# ── layout diario (share): diario/fecha=F/corrida=NNN/ + estado.json ───────────────────────────────────────────────────
+ESTADO = "estado.json"
+
+
+def dir_fecha(raiz: Path, fecha: str) -> Path:
+    return Path(raiz) / "diario" / f"fecha={fecha}"
+
+
+def dir_corrida(raiz: Path, fecha: str, numero: int) -> Path:
+    return dir_fecha(raiz, fecha) / f"corrida={numero:03d}"
+
+
+def fechas_diario(raiz: Path) -> list[str]:
+    base = Path(raiz) / "diario"
+    if not base.is_dir():
+        return []
+    return sorted(d.name.split("=", 1)[1] for d in base.iterdir() if d.is_dir() and d.name.startswith("fecha="))
+
+
+def fechas(raiz: Path) -> list[str]:
+    """Todas las fechas con alguna versión, en cualquiera de los dos layouts."""
+    return sorted(set(cierres(raiz)) | set(fechas_diario(raiz)))
+
+
+def leer_estado(raiz: Path, fecha: str) -> dict:
+    """estado.json de una fecha: {"corridas": {"001": {estado, motivo, ts}}, "fondos": {"20": {"corrida": 1, "estado": …, "historial": [...]}}, …}."""
+    p = dir_fecha(raiz, fecha) / ESTADO
+    if not p.exists():
+        return {"corridas": {}, "fondos": {}}
+    e = json.loads(p.read_text(encoding="utf-8"))
+    e.setdefault("corridas", {})
+    e.setdefault("fondos", {})
+    return e
+
+
+def escribir_estado(raiz: Path, fecha: str, estado: dict) -> None:
+    _json_atomico(dir_fecha(raiz, fecha) / ESTADO, estado)
+
+
+def _es_version(d: Path, prefijo: str) -> bool:
+    return d.is_dir() and d.name.startswith(prefijo) and not d.name.endswith(".tmp") and (d / CORRIDA).exists()
+
+
+def limpiar_tmp(raiz: Path) -> list[str]:
+    """Borra carpetas `*.tmp` (corridas interrumpidas) y devuelve sus nombres."""
+    out = []
+    for p in Path(raiz).rglob("*.tmp"):
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+            out.append(str(p))
+    return out
+
+
 def listar_versiones(raiz: Path, fecha: str | None = None) -> pd.DataFrame:
-    """Una fila por versión: cierre, version, estado, motivo, ts, completitud, n_pendientes, anterior, ruta."""
+    """Una fila por versión en cualquiera de los dos layouts: cierre, version, estado, motivo, ts, completitud, n_pendientes, anterior, ruta, layout."""
     filas = []
-    for f in ([fecha] if fecha else cierres(raiz)):
+    for f in ([fecha] if fecha else fechas(raiz)):
         base = dir_cierre(raiz, f)
-        if not base.is_dir():
-            continue
-        pub = {int(e["version"]): e for e in leer_publicacion(raiz, f)}
-        for d in sorted(base.iterdir()):
-            if d.is_dir() and d.name.startswith("version=") and (d / CORRIDA).exists():
-                n = int(d.name.split("=", 1)[1])
-                c = leer_corrida(d)
-                e = pub.get(n, {})
-                ant = c.get("anterior_version") or {}
-                filas.append(dict(cierre=f, version=n, estado=e.get("estado", c.get("estado", "")), motivo=e.get("motivo", c.get("motivo", "")),
-                                  ts=e.get("ts", c.get("ts", "")), completitud=c.get("completitud", ""), n_pendientes=c.get("n_pendientes", 0),
-                                  anterior=f"{ant.get('cierre', '')}/v{ant.get('version', '')}" if ant.get("cierre") else ant.get("origen", ""),
-                                  ruta=str(d)))
-    return pd.DataFrame(filas, columns=["cierre", "version", "estado", "motivo", "ts", "completitud", "n_pendientes", "anterior", "ruta"])
+        if base.is_dir():
+            pub = {int(e["version"]): e for e in leer_publicacion(raiz, f)}
+            for d in sorted(base.iterdir()):
+                if _es_version(d, "version="):
+                    n = int(d.name.split("=", 1)[1])
+                    filas.append(_fila_version(f, n, d, pub.get(n, {}), "cierres"))
+        base = dir_fecha(raiz, f)
+        if base.is_dir():
+            est = leer_estado(raiz, f)["corridas"]
+            for d in sorted(base.iterdir()):
+                if _es_version(d, "corrida="):
+                    n = int(d.name.split("=", 1)[1])
+                    filas.append(_fila_version(f, n, d, est.get(f"{n:03d}", est.get(str(n), {})), "diario"))
+    return pd.DataFrame(filas, columns=["cierre", "version", "estado", "motivo", "ts", "completitud", "n_pendientes", "anterior", "ruta", "layout"])
+
+
+def _fila_version(f: str, n: int, d: Path, e: dict, layout: str) -> dict:
+    c = leer_corrida(d)
+    ant = c.get("anterior_version") or {}
+    return dict(cierre=f, version=n, estado=e.get("estado", c.get("estado", "")), motivo=e.get("motivo", c.get("motivo", "")),
+                ts=e.get("ts", c.get("ts", "")), completitud=c.get("completitud", ""), n_pendientes=c.get("n_pendientes", 0),
+                anterior=f"{ant.get('cierre', '')}/v{ant.get('version', '')}" if ant.get("cierre") else ant.get("origen", ""),
+                ruta=str(d), layout=layout)
+
+
+def ultima_corrida(raiz: Path, fecha: str) -> int:
+    t = listar_versiones(raiz, fecha)
+    return int(t["version"].max()) if len(t) else 0
+
+
+class Lock:
+    """Candado de escritura del datamart (`<raiz>/.lock`, O_CREAT|O_EXCL): host, pid y hora; vence a `horas`."""
+
+    def __init__(self, raiz: Path, horas: float = 6.0, nombre: str = "diario"):
+        self.path, self.horas, self.nombre = Path(raiz) / ".lock", horas, nombre
+        self.adquirido = False
+
+    def _vencido(self) -> bool:
+        import time
+        try:
+            info = json.loads(self.path.read_text(encoding="utf-8"))
+            return time.time() - float(info.get("epoch", 0)) > self.horas * 3600
+        except Exception:                      # noqa: BLE001 — lock ilegible = vencido
+            return True
+
+    def __enter__(self):
+        import os
+        import socket
+        import time
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.exists() and self._vencido():
+            self.path.unlink(missing_ok=True)
+        try:
+            fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            raise RuntimeError(f"datamart bloqueado por otra corrida: {self.path.read_text(encoding='utf-8')}") from None
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"host": socket.gethostname(), "pid": os.getpid(), "epoch": time.time(), "nombre": self.nombre,
+                       "ts": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
+        self.adquirido = True
+        return self
+
+    def __exit__(self, *exc):
+        if self.adquirido:
+            self.path.unlink(missing_ok=True)
+            self.adquirido = False
+        return False
 
 
 def copiar_version(origen: Path, destino: Path) -> Path:
+    """Copia atómica (a `.tmp` y rename)."""
     destino = Path(destino)
     if destino.exists():
         raise FileExistsError(f"la versión ya existe: {destino}")
-    shutil.copytree(origen, destino)
+    tmp = destino.with_name(destino.name + ".tmp")
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    shutil.copytree(origen, tmp)
+    tmp.rename(destino)
     return destino
 
 
