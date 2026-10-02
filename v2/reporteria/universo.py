@@ -123,7 +123,7 @@ def asignar_hedge(pos: pd.DataFrame, fondos: pd.DataFrame, strong_ccy: set[str],
             heredado = heredado.where(heredado.notna(), pos["Pos_Key"].map(prev_k))
         en_prev = heredado.notna() & con_politica
         hedge[en_prev] = heredado[en_prev].to_numpy()
-        origen[en_prev] = "MES_ANTERIOR"
+        origen[en_prev] = "ANTERIOR"
     else:
         en_prev = pd.Series(False, index=pos.index)
     nuevos = con_politica & ~en_prev & hedge.ne("")

@@ -43,7 +43,7 @@ def test_hedge_hereda_del_cierre_anterior():
     ant = pd.DataFrame([dict(Pos_ID="20|1-1|Asset", Hedge_Currency="")])          # el analista lo dejó sin hedge
     out, al = asignar_hedge(pos, FONDOS, {"USD"}, {"BR": "BRL"}, ant)
     assert out["Hedge_Currency"].tolist() == ["", "CLP"]
-    assert out["Hedge_Origen"].tolist() == ["MES_ANTERIOR", "REGLA"]
+    assert out["Hedge_Origen"].tolist() == ["ANTERIOR", "REGLA"]
     assert set(al.loc[al["Nombre"] == "HEDGE_NUEVO", "PK2"]) == {"7-1"}
 
 

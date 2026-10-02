@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import typer
 
 from .config import Rutas
@@ -105,12 +106,19 @@ def _impacto_tras_correr(r: Rutas, fecha: str, sin_recalcular: bool, con_termina
     except Exception as e:                      # noqa: BLE001 — el impacto nunca invalida la corrida
         typer.echo(f"impacto: no se pudo evaluar ({e})")
         return
-    otros = imp[imp["cierre"].ne(fecha)] if len(imp) else imp
     if imp.empty:
         typer.echo("impacto: los cierres publicados siguen vigentes con la verdad actual")
         return
     for _, f in resumen_impacto(imp).iterrows():
-        typer.echo(f"  impacto {f['cierre']} v{int(f['version']):03d}: {f['consecuencia']} ×{int(f['N'])}")
+        typer.echo(f"  impacto {f['cierre']} v{int(f['version']):03d}: {f['consecuencia']} ×{int(f['N'])}" + ("  [solo marcado]" if f["accion"] == "MARCAR" else ""))
+    marcados = imp[imp["accion"].eq("MARCAR")]
+    if len(marcados):
+        typer.echo(f"  marcado sin re-expresar (política reexpresar_por): {sorted(set(marcados['consecuencia']))} → "
+                   f"reporteria recalcular --desde {min(marcados['cierre'])} --motivo \"...\"")
+    imp = imp[imp["accion"].eq("REEXPRESAR")]
+    otros = imp[imp["cierre"].ne(fecha)] if len(imp) else imp
+    if imp.empty:
+        return
     if otros.empty:
         typer.echo(f"  (el cierre {fecha} se re-expresa con `publicar --reexpresar --motivo` a partir de este borrador)")
         return
@@ -677,26 +685,30 @@ def declarar(tabla: str = typer.Option("bd_instrumentos"), llave: str = typer.Op
 
 # ── impacto y re-expresión ─────────────────────────────────────────────────────────────────────────────────────────────
 @app.command()
-def impacto(fecha: str | None = typer.Option(None, help="Solo ese cierre (default: todos los publicados)"),
+def impacto(fecha: str | None = typer.Option(None, help="Solo ese cierre (default: los de la ventana; --todos: todos los publicados)"),
+            todos: bool = typer.Option(False, "--todos", help="Ignorar ventana_reexpresion_dias (modo diario)"),
             detalle: bool = typer.Option(False, "--detalle", help="Listar posición por posición"), raiz: Path | None = None):
     """Qué cambió desde que se publicó cada cierre (maestros, dim, REGLAS, código, insumos fechados, cadena) y a cuántas posiciones afecta."""
     from .impacto import impacto as _imp, resumen_impacto
     r = Rutas.desde_env(fecha or "00000000", raiz)
-    imp = _imp(r, [fecha] if fecha else None)
+    imp = _imp(r, [fecha] if fecha else None, todos=todos)
     if imp.empty:
         typer.echo("sin impacto: las versiones vigentes coinciden con la verdad actual")
         raise typer.Exit(0)
     for _, f in resumen_impacto(imp).iterrows():
-        typer.echo(f"  {f['cierre']} v{int(f['version']):03d}  {f['consecuencia']:14} {int(f['N']):>6}")
+        typer.echo(f"  {f['cierre']} v{int(f['version']):03d}  {f['consecuencia']:14} {int(f['N']):>6}  {f['accion']}")
     if detalle:
         for _, f in imp.iterrows():
-            typer.echo(f"    {f['cierre']} {f['Pos_ID'] or '(cierre)':28} {f['atributo']:22} {str(f['antes'])[:30]:30} → {str(f['despues'])[:30]:30} {f['consecuencia']}")
-    typer.echo(f"re-expresar: reporteria recalcular --fecha F [--con-terminal] (o vuelve a ocurrir solo al próximo `correr`)")
+            fondo = f"fondo {int(f['fondo'])}" if pd.notna(f["fondo"]) else "(global)"
+            typer.echo(f"    {f['cierre']} {fondo:10} {f['Pos_ID'] or '':28} {f['atributo']:22} {str(f['antes'])[:30]:30} → {str(f['despues'])[:30]:30} {f['consecuencia']}")
+    typer.echo("re-expresar: REEXPRESAR ocurre solo al próximo `correr`; MARCAR requiere reporteria recalcular --desde F --motivo \"...\"")
     raise typer.Exit(1)
 
 
 @app.command()
-def recalcular(fecha: str = typer.Option(..., help="Cierre YYYYMMDD publicado"),
+def recalcular(fecha: str | None = typer.Option(None, help="Cierre YYYYMMDD publicado"),
+               desde: str | None = typer.Option(None, help="Re-expresar todas las fechas ≥ YYYYMMDD (lo marcado: código, REGLAS globales, fuera de ventana)"),
+               hasta: str | None = typer.Option(None, help="Con --desde: última fecha a re-expresar"),
                motivo: str = typer.Option("", help="Qué cambió (queda en la versión)"),
                con_terminal: bool = typer.Option(False, "--con-terminal", help="Pedir a Bloomberg lo que no está en caché (cierra pendientes)"),
                sin_cadena: bool = typer.Option(False, "--sin-cadena", help="No re-expresar los cierres posteriores afectados"),
@@ -704,7 +716,18 @@ def recalcular(fecha: str = typer.Option(..., help="Cierre YYYYMMDD publicado"),
                refrescar_facts: bool = typer.Option(False, "--refrescar-facts", help="Volver a bajar Facts en vez de usar facturas_al_cierre de la versión"),
                raiz: Path | None = None):
     """Re-expresa un cierre publicado con la verdad actual y lo publica como nueva versión REEXPRESADA (y encadena los posteriores)."""
-    from .impacto import impacto as _imp, recalcular as _rec, reexpresar_impactados
+    from .impacto import impacto as _imp, recalcular as _rec, recalcular_desde, reexpresar_impactados
+    if desde:
+        if not motivo:
+            typer.echo("ERROR: --desde necesita --motivo")
+            raise typer.Exit(2)
+        r = Rutas.desde_env(desde, raiz)
+        for v in recalcular_desde(r, desde, motivo, con_terminal, bbg_factory=lambda rf: _bbg_para(rf, con_terminal), hasta=hasta):
+            typer.echo(f"  {v.etiqueta} ({v.completitud}; pendientes {v.corrida.get('n_pendientes', 0)})")
+        raise typer.Exit(0)
+    if not fecha:
+        typer.echo("ERROR: indique --fecha F o --desde F")
+        raise typer.Exit(2)
     r = Rutas.desde_env(fecha, raiz)
     try:
         v = _rec(r, motivo or "manual", con_terminal, set(insumo), refrescar_facts, bbg=_bbg_para(r, con_terminal))

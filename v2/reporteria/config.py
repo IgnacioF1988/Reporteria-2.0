@@ -142,7 +142,7 @@ class Rutas:
             datamart=Path(datamart) if datamart else DATAMART_DEFAULT, modo=modo,
             reglas=manuales / "REGLAS.xlsx",
             facturas=_uno(str(mercado / f"FACTURAS_{fecha}*.xlsx")), jpm=_uno(str(mercado / f"JPM_CEMBI_GBI_{fecha}*.xlsx")),
-            ra=mercado / "RA_TIR.xlsx", jsonl=geneva / "bond_schedule.jsonl",
+            ra=_uno(str(mercado / f"RA_TIR_{fecha}*.xlsx")) or mercado / "RA_TIR.xlsx", jsonl=geneva / "bond_schedule.jsonl",
             indexes=_uno(str(mercado / f"Carga_Indexes_{fecha}*.csv")),
             curvas_sob=_uno(str(mercado / f"Carga_CurvasSoberanas_{fecha}*.csv")),
             paridades=mercado / "4- Carga de paridades.xlsx",

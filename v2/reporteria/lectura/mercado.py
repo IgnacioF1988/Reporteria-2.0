@@ -40,12 +40,18 @@ def leer_jpm(path: Path) -> pd.DataFrame:
     return out.drop_duplicates("ISIN", keep="first").reset_index(drop=True)
 
 
-def leer_ra(path: Path, hoja: str) -> pd.DataFrame:
-    """RA_TIR.xlsx, hoja del mes: la columna A es el nemotécnico (su header es la fecha del snapshot)."""
+def leer_ra(path: Path, hoja: str | None, respaldo: bool = False) -> pd.DataFrame:
+    """RA_TIR.xlsx, hoja del mes (o la primera si `hoja` es None: archivo fechado RA_TIR_{F}.xlsx del modo diario). Con `respaldo`,
+    si la hoja del mes aún no existe se usa la última (modo diario al cambiar de mes). La columna A es el nemotécnico."""
     xl = pd.ExcelFile(path)
+    if hoja is None:
+        hoja = xl.sheet_names[0]
     if hoja not in xl.sheet_names:
-        raise ValueError(f"RA_TIR.xlsx sin hoja '{hoja}'; tiene {xl.sheet_names}")
+        if not respaldo:
+            raise ValueError(f"{path.name} sin hoja '{hoja}'; tiene {xl.sheet_names}")
+        hoja = xl.sheet_names[-1]
     r = xl.parse(hoja)
+    r.attrs["hoja"] = hoja
     r = r.rename(columns={r.columns[0]: "Nemo"})
     out = pd.DataFrame({"Nemo": limpiar_txt(r["Nemo"]).str.upper(),
                         "Yield": pd.to_numeric(r[_col(r, "TIR")], errors="coerce") / 100,

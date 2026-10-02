@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -26,6 +26,7 @@ class Reglas:
     overrides_atributo: pd.DataFrame
     alertas: pd.DataFrame
     parametros: dict
+    feriados: pd.DataFrame = field(default_factory=pd.DataFrame)     # hoja opcional (Fecha, Mercado, Descripcion): calendario de corrida
 
 
 def _cols(df: pd.DataFrame, hoja: str, req: tuple[str, ...]) -> pd.DataFrame:
@@ -212,4 +213,13 @@ def leer_reglas(path: Path, fondos_validos: set[int] | None = None) -> Reglas:
                   _cajas(h["cajas"], fondos_validos), _defaulteados(h["defaulteados"], fondos_validos),
                   _overrides_valor(h["overrides_valor"], fondos_validos),
                   _overrides_atributo(h["overrides_atributo"], fondos_validos),
-                  _alertas(h["alertas"], fondos_validos), _parametros(h["parametros"]))
+                  _alertas(h["alertas"], fondos_validos), _parametros(h["parametros"]),
+                  _feriados(xl.parse("feriados")) if "feriados" in xl.sheet_names else pd.DataFrame(columns=["Fecha", "Mercado", "Descripcion"]))
+
+
+def _feriados(df: pd.DataFrame) -> pd.DataFrame:
+    df = _cols(df, "feriados", ("Fecha",))
+    out = pd.DataFrame({"Fecha": pd.to_datetime(df["Fecha"], errors="coerce"),
+                        "Mercado": limpiar_txt(df["Mercado"]).str.upper() if "Mercado" in df.columns else "",
+                        "Descripcion": limpiar_txt(df["Descripcion"]) if "Descripcion" in df.columns else ""})
+    return out.dropna(subset=["Fecha"]).reset_index(drop=True)

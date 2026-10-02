@@ -42,7 +42,7 @@ def escribir_excel(hojas: dict[str, pd.DataFrame], path: Path) -> Path:
 
 
 def comparar_carteras(a: pd.DataFrame, b: pd.DataFrame, tol: float = 1e-9) -> pd.DataFrame:
-    """Diferencias entre dos `cartera_final` por Pos_ID: solo en uno, o Yield/Duration/Fuente/Conversion distintos."""
+    """Diferencias entre dos `cartera_final` por Pos_ID: solo en uno, o Yield/Duration/Fuente/Conversion/Estado/Hedge_Currency distintos."""
     a, b = a.drop_duplicates("Pos_ID").set_index("Pos_ID"), b.drop_duplicates("Pos_ID").set_index("Pos_ID")
     filas = []
     solo_a, solo_b = sorted(set(a.index) - set(b.index)), sorted(set(b.index) - set(a.index))
@@ -62,7 +62,7 @@ def comparar_carteras(a: pd.DataFrame, b: pd.DataFrame, tol: float = 1e-9) -> pd
             x, y = pd.to_numeric(a.loc[comunes, c], errors="coerce"), pd.to_numeric(b.loc[comunes, c], errors="coerce")
             m = ~((x - y).abs() <= tol) & ~(x.isna() & y.isna())
             filas += [dict(Pos_ID=p, Campo=c, A=x[p], B=y[p]) for p in comunes[m.to_numpy()]]
-    for c in ("Fuente", "Conversion", "Estado"):
+    for c in ("Fuente", "Conversion", "Estado", "Hedge_Currency"):
         if c in a.columns and c in b.columns:
             x, y = a.loc[comunes, c].fillna("").astype(str), b.loc[comunes, c].fillna("").astype(str)
             filas += [dict(Pos_ID=p, Campo=c, A=x[p], B=y[p]) for p in comunes[(x != y).to_numpy()]]

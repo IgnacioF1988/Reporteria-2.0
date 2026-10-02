@@ -82,6 +82,37 @@ def ultima_verdad(raiz: Path, fecha: str | None) -> Version | None:
     return resolver_version(raiz, fecha) if fecha else None
 
 
+def anterior_por_fondo(raiz: Path, fecha: str, max_fechas: int = 90) -> tuple[pd.DataFrame | None, dict | None]:
+    """Cartera anterior **por fondo**: para cada fondo, su última verdad más reciente con fecha < `fecha` (el puntero `corrida` de
+    estado.json en el layout diario; la última versión en cierres/). Puede ser una fecha distinta por fondo (un fondo que faltó un
+    día hereda del anterior). Devuelve (posiciones concatenadas con `Fecha_Ant`, {"origen": "DATAMART_POR_FONDO", "fondos": {...}})."""
+    from .publicacion import estado_fondos
+    previas = [f for f in DM.fechas(raiz) if f < fecha][-max_fechas:]
+    if not previas:
+        return None, None
+    partes, info, vistos = [], {}, set()
+    for f in reversed(previas):
+        t = estado_fondos(raiz, f)
+        t = t[t["corrida"].notna() & ~t["ID_Fund"].isin(vistos)] if len(t) else t
+        if t.empty:
+            continue
+        for corrida, grupo in t.groupby("corrida"):
+            d = DM.dir_corrida(raiz, f, int(corrida)) if DM.dir_corrida(raiz, f, int(corrida)).exists() else DM.dir_version(raiz, f, int(corrida))
+            pos = DM.leer_posiciones(d)
+            if pos is None:
+                continue
+            fondos = [int(x) for x in grupo["ID_Fund"]]
+            sub = pos[pos["ID_Fund"].isin(fondos)]
+            if len(sub):
+                partes.append(sub.assign(Fecha_Ant=f))
+            for fid, est in zip(grupo["ID_Fund"], grupo["estado"]):
+                info[int(fid)] = {"cierre": f, "version": int(corrida), "estado": est}
+                vistos.add(int(fid))
+    if not partes:
+        return None, None
+    return pd.concat(partes, ignore_index=True), {"origen": "DATAMART_POR_FONDO", "fondos": info}
+
+
 def publicar(raiz: Path, fecha: str, borrador: Path, motivo: str = "", reexpresar: bool = False, modo: str = "mensual") -> Version:
     """Copia el borrador al datamart como nueva versión. La primera es PUBLICADA; las siguientes exigen `reexpresar` y quedan REEXPRESADA.
 

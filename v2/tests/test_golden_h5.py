@@ -63,7 +63,7 @@ def test_corrida_completa_y_segunda_con_cierre_anterior(fixtures, tmp_path):
     r2 = res2.alertas_resumen
     assert (r2.loc[r2["ID"].isin(["A05", "A06", "A07"]), "Estado"] == "ACTIVA").all()
     assert r2.loc[r2["ID"] == "A06", "N"].iloc[0] > 400 and r2.loc[r2["ID"].isin(["A05", "A07"]), "N"].sum() == 0
-    assert (res2.posiciones["Hedge_Origen"] == "MES_ANTERIOR").sum() >= 40
+    assert (res2.posiciones["Hedge_Origen"] == "ANTERIOR").sum() >= 40
     assert res2.resumen["fecha_ant"] == "20260630"
     same = res2.posiciones.set_index("Pos_ID")["Yield"].fillna(-1).eq(pos.set_index("Pos_ID")["Yield"].fillna(-1))
     assert same.all()

@@ -156,6 +156,6 @@ def test_correr_deja_borrador_publicar_reporte_y_anterior_desde_datamart(fixture
     assert r2.fecha_ant == "20260630"
     res2 = correr(r2, Opciones(sin_bbg=True, sin_sql=True, sin_facts=True, bbg=FixtureBloomberg(r2.cache, "20260731"), fx=FixtureFx(fixtures, "20260731")))
     assert res2.resumen["anterior_version"] == {"origen": "DATAMART", "cierre": "20260630", "version": 1, "estado": "PUBLICADA", "ts": res2.resumen["anterior_version"]["ts"]}
-    assert (res2.posiciones["Hedge_Origen"] == "MES_ANTERIOR").sum() >= 40
+    assert (res2.posiciones["Hedge_Origen"] == "ANTERIOR").sum() >= 40
     assert DM.leer_corrida(res2.borrador)["anterior_version"]["origen"] == "DATAMART"
     assert len(DMV.borradores(r.borradores, "20260731")) == 2

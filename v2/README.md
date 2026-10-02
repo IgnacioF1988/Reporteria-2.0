@@ -135,6 +135,26 @@ fondos están sin publicar. `impacto` trae ahora la columna `fondo`. Vistas Duck
 `estado`, `posiciones_diarias`, `publicadas` (solo lo oficial) y `ultima_verdad` (incluye PROVISORIO con `estado_fondo` y `bloqueos`);
 el layout mensual de git se lee como si todos los fondos de la última versión estuvieran publicados.
 
+**Semántica diaria (H10c).** Hay **un cierre por cada día calendario**: Geneva lo entrega el siguiente día hábil (el lunes aparecen
+viernes, sábado y domingo; tras un feriado, todo lo acumulado). `calendario.pendientes(fechas_con_corrida, hoy, existe_cubo, feriados)`
+lista las fechas hasta hoy−1 sin corrida y su estado: `LISTA` (hay CUBO), `AUN_NO_ESPERADA` (llega el próximo hábil) o `SIN_CUBO`
+(ya pasó el hábil en que debía llegar: anomalía). Hábil = lunes a viernes fuera de la hoja opcional `REGLAS/feriados` (`Fecha, Mercado,
+Descripcion`; cuentan las filas con Mercado vacío o CL/GLOBAL). El cierre mensual es el fondo-día del último día calendario del mes,
+sin caso especial. En modo diario:
+- el **cierre anterior es por fondo** (`datamart.anterior_por_fondo`): la última verdad de cada fondo con fecha anterior, aunque sea de
+  distinta fecha por fondo (un fondo que faltó un día hereda del anterior; `anterior_version.fondos` lo registra); `Hedge_Origen` pasa a
+  `ANTERIOR` (antes `MES_ANTERIOR`) y un fondo sin cartera previa recibe la alerta INFO `SIN_HISTORIA`;
+- un parámetro `clave_diario` en REGLAS/parametros pisa a `clave` (p. ej. `delta_yield_max_diario`, `cobertura_min_mv_diario`);
+- `RA_TIR_{F}.xlsx` fechado tiene prioridad sobre `RA_TIR.xlsx` (se lee su primera hoja y cuenta como insumo fechado para el impacto);
+  con el archivo mensual, si la hoja del mes aún no existe se usa la última;
+- **CADENA por contenido**: impacto solo si el hedge que hoy heredaría una posición difiere del que usó esa versión (no por número de
+  versión); `comparar` también compara `Hedge_Currency`;
+- política `reexpresar_por` (REGLAS/parametros; default diario `MAESTRO;DIM;INSUMO;CADENA`, mensual todo): lo que no está en la
+  política se **marca** (`accion=MARCAR` en `impacto`) y se re-expresa a mano con `reporteria recalcular --desde F [--hasta G] --motivo
+  "..."`; una hoja de REGLAS cuyas filas distintas tienen todas `ID_Fund` re-expresa solo esos fondos; cambios de código y REGLAS
+  globales solo marcan;
+- `impacto` evalúa solo los últimos `ventana_reexpresion_dias` (60) días; `impacto --todos` los evalúa todos.
+
 ## Impacto y re-expresión (`impacto`, `recalcular`, `pendientes`)
 Cada `correr` termina evaluando el **impacto** de la verdad actual sobre la última verdad de cada cierre publicado: atributos del
 maestro usados vs as-of hoy (consecuencia CLASIFICACION, HEDGE, FUENTE, IDENTIDAD), dimensionales re-resueltas (DIM), hojas de REGLAS

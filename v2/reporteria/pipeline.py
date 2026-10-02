@@ -193,7 +193,14 @@ def _maestros(rutas: Rutas, opciones: Opciones, log, al: list) -> tuple[dict[str
 
 
 def _cartera_anterior(rutas: Rutas, log) -> tuple[pd.DataFrame | None, dict | None]:
-    """Última verdad del cierre anterior en el datamart; si no hay versión, el REPORTE Excel de 02_OUTPUTS (como antes)."""
+    """Modo diario: última verdad **por fondo** (puede ser una fecha distinta por fondo). Modo mensual: última verdad del cierre
+    anterior en el datamart; si no hay versión, el REPORTE Excel de 02_OUTPUTS (como antes)."""
+    if rutas.modo == "diario":
+        ant, info = datamart.anterior_por_fondo(rutas.datamart, rutas.fecha)
+        if ant is not None:
+            por_fecha = ant.groupby("Fecha_Ant")["ID_Fund"].nunique().to_dict()
+            log.info("cierre anterior por fondo: %d posiciones de %d fondos %s", len(ant), len(info["fondos"]), por_fecha)
+            return ant, info
     v = datamart.ultima_verdad(rutas.datamart, rutas.fecha_ant)
     if v is not None and (ant := v.posiciones()) is not None:
         log.info("cierre anterior %s: %d posiciones desde el datamart (%s)", rutas.fecha_ant, len(ant), v.etiqueta)
@@ -252,6 +259,12 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
              len(dims.clasificacion) - nf, nf, dims.meta.get("importado", "?"))
     fondos_validos = set(bd_funds["ID_Fund"]) | set(cubo["ID_Fund"])
     reglas = leer_reglas(rutas.reglas, fondos_validos)
+    if rutas.modo == "diario":                      # `clave_diario` pisa a `clave` (umbrales de un día vs de un mes)
+        diarios = {k[:-7]: v for k, v in reglas.parametros.items() if k.endswith("_diario")}
+        if diarios:
+            import dataclasses
+            reglas = dataclasses.replace(reglas, parametros={**reglas.parametros, **diarios})
+            log.info("parámetros diarios: %s", diarios)
     log.info("CUBO: %d filas, fondos %s", len(cubo), sorted(cubo["ID_Fund"].unique()))
     maestros, info_maestros = _maestros(rutas, opciones, log, al)
     pos, a = universo.armar_universo(cubo, maestros["bd_instrumentos"], bd_funds, dims.bd_monedas())
@@ -263,6 +276,10 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     ant, anterior_version = _cartera_anterior(rutas, log)
     pos, a = universo.asignar_hedge(pos, reglas.fondos, STRONG_CCY, RISK_COUNTRY_TO_LOCAL_CCY, ant)
     al.append(a)
+    if ant is not None and len(ant):
+        sin_historia = pos[~pos["ID_Fund"].isin(set(ant["ID_Fund"]))].drop_duplicates("ID_Fund")
+        if len(sin_historia):
+            al.append(alertas.emitir("SIN_HISTORIA", "INFO", sin_historia, "fondo sin cartera anterior: hedge por regla y alertas temporales no aplican", ambito="FONDO"))
     pos, a = overrides.aplicar_atributos(pos, reglas.overrides_atributo, rutas.settle, ("Hedge_Currency",))
     al.append(a)
 
@@ -311,7 +328,8 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         al.append(alertas.emitir("INSUMO_FALTANTE", "ALTA", detalle="EXCEPCIONES*.xlsx: ninguno en MANUALES", ambito="CORRIDA"))
     jpm = _opcional("JPM", rutas.jpm, leer_jpm, log, al)
     c, a = candidatos_jpm(pos, jpm); cands.append(c); al.append(a)
-    ra = _opcional("RA_TIR", rutas.ra, lambda p: leer_ra(p, str(reglas.parametros.get("hoja_ra", "")) or hoja_ra(rutas.fecha)), log, al)
+    hoja = str(reglas.parametros.get("hoja_ra", "")) or (None if rutas.ra.name != "RA_TIR.xlsx" else hoja_ra(rutas.fecha))   # fechado: primera hoja
+    ra = _opcional("RA_TIR", rutas.ra, lambda p: leer_ra(p, hoja, respaldo=rutas.modo == "diario"), log, al)
     c, a = candidatos_ra(pos, ra, reglas.parametros); cands.append(c); al.append(a)
     cand = pd.concat([x for x in cands if len(x)], ignore_index=True) if any(len(x) for x in cands) else cands[0]
     cand, a = cascada.validar_candidatos(cand, reglas.parametros); al.append(a)

@@ -81,13 +81,21 @@ def test_impacto_vacio_tras_publicar_y_detecta_maestro_dim_reglas_codigo_cadena(
     assert (imp["consecuencia"] == "CODIGO").sum() == 1
     monkeypatch.undo()
 
-    # cadena: aparece un cierre anterior publicado después
+    # cadena por contenido: aparece un cierre anterior cuyo hedge difiere en 3 posiciones → CADENA solo en esas (con fondo)
     hojas_v, pos_v, c_v = DM.leer_version(v1.ruta)
+    con_regla = pos_v.index[pos_v["Hedge_Origen"].eq("REGLA")][:3]
+    pos_v.loc[con_regla, "Hedge_Currency"] = "EUR"
     DM.escribir_version(fx.parent / "ant", hojas_v, {**c_v, "fecha": "20260630"}, pos_v)
     DMV.publicar(r.datamart, "20260630", fx.parent / "ant")
     imp = IMP.impacto(r)
     cad = imp[imp["consecuencia"].eq("CADENA")]
-    assert len(cad) == 1 and cad.iloc[0]["cierre"] == "20260731" and cad.iloc[0]["despues"] == "20260630/v001"
+    assert len(cad) == 3 and set(cad["Pos_ID"]) == set(pos_v.loc[con_regla, "Pos_ID"]) and (cad["despues"] == "EUR").all()
+    assert (cad["cierre"] == "20260731").all() and cad["fondo"].notna().all() and (imp["accion"] == "REEXPRESAR").all()
+    # una copia idéntica del anterior no es cadena
+    pos_v.loc[con_regla, "Hedge_Currency"] = v1.posiciones().set_index("Pos_ID").loc[pos_v.loc[con_regla, "Pos_ID"], "Hedge_Currency"].to_numpy()
+    DM.escribir_version(fx.parent / "ant2", hojas_v, {**c_v, "fecha": "20260630"}, pos_v)
+    DMV.publicar(r.datamart, "20260630", fx.parent / "ant2", motivo="igual", reexpresar=True)
+    assert IMP.impacto(r).query("consecuencia == 'CADENA'").empty          # (DIM y REGLAS siguen con impacto por los cambios de arriba)
 
 
 def test_recalcular_reexpresa_con_pendientes_y_cadena(entorno):
@@ -129,13 +137,16 @@ def test_recalcular_reexpresa_con_pendientes_y_cadena(entorno):
     v3 = IMP.recalcular(r, "terminal", con_terminal=False, bbg=FixtureBloomberg(r.cache, "20260731"), fx=FixtureFx(fx, "20260731"))
     p3 = v3.posiciones().set_index("Pos_ID")
     assert v3.numero == 3 and v3.completitud == "COMPLETA" and p3.loc[eq.name, "Estado"] == "RESUELTO" and abs(p3.loc[eq.name, "Yield"] - 0.065) < 1e-9
-    # cadena: publicar un cierre anterior nuevo deja CADENA en 20260731 y reexpresar_impactados lo cierra
+    # cadena: un cierre anterior con hedge distinto en 3 posiciones deja CADENA en 20260731 y reexpresar_impactados lo cierra heredando
     hojas_v, pos_v, c_v = DM.leer_version(v3.ruta)
+    con_regla = pos_v.index[pos_v["Hedge_Origen"].eq("REGLA")][:3]
+    pos_v.loc[con_regla, "Hedge_Currency"] = "EUR"
     DM.escribir_version(fx.parent / "ant", hojas_v, {**c_v, "fecha": "20260630"}, pos_v)
     DMV.publicar(r.datamart, "20260630", fx.parent / "ant")
     imp = IMP.impacto(r)
-    assert set(imp["consecuencia"]) == {"CADENA"}
+    assert set(imp["consecuencia"]) == {"CADENA"} and len(imp) == 3
     hechos = IMP.reexpresar_impactados(r, imp, bbg_factory=lambda rf: FixtureBloomberg(rf.cache, rf.fecha), fx=FixtureFx(fx, "20260731"))
     assert [h.cierre for h in hechos] == ["20260731"] and hechos[0].numero == 4 and hechos[0].corrida["anterior_version"]["cierre"] == "20260630"
     assert IMP.impacto(r).empty
-    assert (hechos[0].posiciones()["Hedge_Origen"] == "MES_ANTERIOR").sum() >= 40
+    p4 = hechos[0].posiciones().set_index("Pos_ID")
+    assert (p4["Hedge_Origen"] == "ANTERIOR").sum() >= 40 and (p4.loc[pos_v.loc[con_regla, "Pos_ID"], "Hedge_Currency"] == "EUR").all()
