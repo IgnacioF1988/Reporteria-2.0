@@ -294,16 +294,24 @@ def hash_archivo(path: Path | None) -> str:
 
 
 def hash_carpeta(dir_: Path | None, patron: str = "*") -> tuple[str, int]:
-    """Hash conjunto (nombre + hash de cada archivo) y número de archivos; ('', 0) si no existe."""
+    """Huella conjunta de una carpeta (nombre + tamaño + mtime de cada archivo) y número de archivos; ('', 0) si no existe.
+
+    Por `stat`, sin leer contenido: la caché del cierre vive en un share (cientos de CSV de Bloomberg y los de Facts con cientos de
+    miles de filas) y leerla entera por red tardaba minutos al escribir cada borrador."""
     if dir_ is None or not Path(dir_).is_dir():
         return "", 0
     h, n = hashlib.sha256(), 0
     for p in sorted(Path(dir_).rglob(patron)):
-        if p.is_file():
-            h.update(p.relative_to(dir_).as_posix().encode())
-            h.update(hash_archivo(p).encode())
+        st = p.stat()
+        if stat_es_archivo(st):
+            h.update(f"{p.relative_to(dir_).as_posix()}|{st.st_size}|{st.st_mtime_ns}".encode())
             n += 1
     return (h.hexdigest()[:16] if n else ""), n
+
+
+def stat_es_archivo(st) -> bool:
+    import stat as _stat
+    return _stat.S_ISREG(st.st_mode)
 
 
 def hash_codigo(paquete: Path | None = None) -> str:

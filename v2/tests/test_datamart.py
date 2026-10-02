@@ -82,6 +82,27 @@ def test_hash_codigo_y_archivo(tmp_path):
     assert DM.hash_carpeta(tmp_path)[1] == 1 and DM.hash_carpeta(tmp_path / "nada") == ("", 0)
 
 
+def test_hash_carpeta_por_stat_no_lee_contenido(tmp_path, monkeypatch):
+    """La huella de la caché cambia con nombre, tamaño o mtime, y nunca abre los archivos (share lento)."""
+    import os
+    (tmp_path / "bdp_a.csv").write_text("ticker,valor\nA,1\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.csv").write_text("x\n")
+    h1, n = DM.hash_carpeta(tmp_path)
+    assert n == 2 and len(h1) == 16
+    monkeypatch.setattr("builtins.open", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no debe leer contenido")))
+    assert DM.hash_carpeta(tmp_path) == (h1, 2)
+    monkeypatch.undo()
+    os.utime(tmp_path / "bdp_a.csv", ns=(1, 1))
+    assert DM.hash_carpeta(tmp_path)[0] != h1
+
+
+def test_paquete_desactiva_el_handler_fortran_de_ctrl_c():
+    import os
+    import reporteria  # noqa: F401
+    assert os.environ.get("FOR_DISABLE_CONSOLE_CTRL_HANDLER") == "1"
+
+
 def test_correr_deja_borrador_publicar_reporte_y_anterior_desde_datamart(fixtures, tmp_path):
     """e2e mini: la corrida escribe un borrador completo; publicar lo lleva al datamart; reporte reproduce el Excel hoja por hoja;
     una versión en el datamart para el cierre anterior reemplaza al Excel como cartera previa."""

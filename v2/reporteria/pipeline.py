@@ -442,6 +442,7 @@ def _escribir_borrador(rutas: Rutas, opciones: Opciones, hojas: dict, pos: pd.Da
     """Versión completa de la corrida (formato del datamart) en 02_OUTPUTS/{F}/borradores/borrador_{ts}/: `publicar` la copia al datamart."""
     ts = time.strftime("%Y%m%d_%H%M%S")
     dir_ = rutas.borradores / f"borrador_{ts}"
+    log.info("escribiendo borrador %s (hojas Parquet, copia de insumos, huella de la caché)…", dir_.name)
     pendientes = int(pos["Estado"].eq("PENDIENTE_TERMINAL").sum()) if "Estado" in pos.columns else 0
     corrida = {"fecha": rutas.fecha, "ts": time.strftime("%Y-%m-%d %H:%M:%S"), "estado": "BORRADOR", "motivo": opciones.motivo, "version": None,
                "completitud": "PARCIAL" if pendientes else "COMPLETA", "n_pendientes": pendientes,

@@ -33,6 +33,10 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
 ## Versiones
 - `xbbg` 0.7 y ≥ 1.0 funcionan (el adaptador detecta la versión). La 1.x necesita `pyarrow>=22` (viene en el extra `bbg`); si aparece `Backend 'pyarrow' requires pyarrow >= 22`, correr `py -3.12 -m pip install --user --upgrade "pyarrow>=22"`.
 - Si `python` abre la Microsoft Store, usar `py -3.12 -m reporteria.cli ...` (o la versión 3.11+ instalada: `py -0` las lista).
+- `correr`/`recalcular` termina con `escribiendo borrador …` y puede tardar un poco sobre el share: no es un cuelgue, no cortar con
+  Ctrl-C (con el Python de anaconda un Ctrl-C aborta todo el proceso con `forrtl: error (200)`; el paquete lo desactiva para que sea un
+  `KeyboardInterrupt` normal, pero igual se pierde la corrida). Si se cortó después de la línea `estado: {...}`, la caché Bloomberg ya
+  quedó completa: basta `recalcular --fecha F --motivo "..."` sin `--con-terminal` para obtener la versión.
 - Si `check` dice `[AVISO] xbbg instalado pero no carga (ImportError: DLL load failed … _core)`, ese Python no tiene blpapi (pasa con
   3.14): en la estación sin terminal correr `--sin-bbg`; en la terminal usar el Python donde funciona (`py -3.12`). Si se corre igual sin
   `--sin-bbg`, la corrida termina con `BBG_SIN_CONEXION` CRÍTICA y pendientes a terminal, nunca con "sin dato" falsos en la caché.
