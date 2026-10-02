@@ -769,6 +769,87 @@ def pd_empty():
     return pd.DataFrame()
 
 
+# ── modo diario: nocturna, cierre mensual a git, retención ────────────────────────────────────────────────────────────
+def _rutas_diario(fecha: str, raiz: Path | None) -> Rutas:
+    r = Rutas.desde_env(fecha, raiz)
+    if r.modo != "diario":
+        typer.echo(f"ERROR: este comando requiere REPORTERIA_MODO=diario (y REPORTERIA_DATAMART en el share); modo actual: {r.modo}")
+        raise typer.Exit(2)
+    return r
+
+
+@app.command()
+def diario(hoy: str | None = typer.Option(None, help="Fecha de la nocturna YYYYMMDD (default: hoy); procesa los cierres pendientes hasta hoy−1"),
+           hasta: str | None = typer.Option(None, help="Última fecha de cierre a procesar (acotar un catch-up largo)"),
+           dry_run: bool = typer.Option(False, "--dry-run", help="Solo el plan (pendientes, re-evaluaciones, backlog) y el JSON de Teams; no corre nada"),
+           raiz: Path | None = None):
+    """Nocturna: corre y publica por fondo-día las fechas pendientes, re-evalúa provisorios, re-expresa impactos, informa por Teams.
+    Exit: 0 todo publicado · 1 quedan provisorios/sin corrida · 2 fallo de infraestructura · 3 candado ajeno."""
+    import datetime as dt
+    import os
+    from .orquestacion import diario as _diario
+    h = hoy or dt.date.today().strftime("%Y%m%d")
+    r = _rutas_diario(h, raiz)
+    try:
+        n = _diario(r, hoy=h, hasta=hasta, dry_run=dry_run, teams_url=os.environ.get("TEAMS_WEBHOOK_URL"))
+    except Exception as e:                      # noqa: BLE001 — infraestructura (share, dim, datamart)
+        typer.echo(f"ERROR: {e}")
+        raise typer.Exit(2)
+    for f in n.fechas:
+        corrida = f"corrida {f['corrida']:03d}" if f.get("corrida") else ""
+        typer.echo(f"  {f['fecha']}  {f['estado']:16} {corrida} {f.get('fondos') or ''} {f.get('detalle') or ''}")
+    for e in n.reevaluadas:
+        typer.echo(f"  {e['fecha']}  re-evaluada ({', '.join(e['disparadores'])}) → corrida {e['corrida'] or '-'} {e.get('fondos') or ''}")
+    for e in n.reexpresadas:
+        typer.echo(f"  re-expresado {e}")
+    for e in n.errores:
+        typer.echo(f"  [ERR] {e}")
+    typer.echo(f"backlog en ventana: {len(n.backlog)} fondo-día | informe {n.informe} | Teams: {'enviado' if n.teams.get('enviado') else n.teams.get('motivo', '')}")
+    raise typer.Exit(n.codigo)
+
+
+@app.command("cierre-mensual")
+def cierre_mensual_cmd(fecha: str = typer.Option(..., help="Último día calendario del mes YYYYMMDD"),
+                       destino: Path | None = typer.Option(None, help="Datamart de git (default: v2/datamart)"),
+                       forzar: bool = typer.Option(False, "--forzar", help="Copiar aunque haya fondos sin publicar"),
+                       raiz: Path | None = None):
+    """Copia la última corrida del fin de mes al layout de git (cierres/cierre=F/version=NNN + publicacion.json) y marca cierre_mensual en el share."""
+    from .config import DATAMART_DEFAULT
+    from .orquestacion import cierre_mensual
+    r = _rutas_diario(fecha, raiz)
+    dest = Path(destino) if destino else DATAMART_DEFAULT
+    if dest.resolve() == Path(r.datamart).resolve():
+        typer.echo(f"ERROR: el destino es el mismo datamart diario ({dest}); indique --destino <carpeta datamart de git>")
+        raise typer.Exit(2)
+    try:
+        out = cierre_mensual(r, fecha, dest, forzar)
+    except ValueError as e:
+        typer.echo(f"ERROR: {e}")
+        raise typer.Exit(1 if "sin publicar" in str(e) else 2)
+    if not out["copiada"]:
+        typer.echo(f"{fecha}: {out['motivo']} (corrida {out['corrida']:03d}); nada que hacer")
+        raise typer.Exit(0)
+    typer.echo(f"{fecha} v{out['version']:03d} ← corrida {out['corrida']:03d} del share {out['fondos']} → {out['ruta']}")
+    typer.echo(f"ahora: git add {dest} && git commit -m \"cierre mensual {fecha}\" && git push")
+
+
+@app.command()
+def limpiar(dias: int = typer.Option(400, help="Retener fechas de los últimos N días"),
+            hoy: str | None = typer.Option(None, help="Fecha de referencia YYYYMMDD (default: hoy)"),
+            dry_run: bool = typer.Option(False, "--dry-run", help="Solo listar"), raiz: Path | None = None):
+    """Borra corridas superadas (que ningún fondo apunta ni fue oficial), caché y borradores de fechas anteriores a hoy−N, y carpetas .tmp."""
+    import datetime as dt
+    from .orquestacion import limpiar as _limpiar
+    h = hoy or dt.date.today().strftime("%Y%m%d")
+    r = _rutas_diario(h, raiz)
+    out = _limpiar(r, dias, h, dry_run)
+    for clave, lista in out.items():
+        for p in lista:
+            typer.echo(f"  {clave:10} {p}")
+    typer.echo(f"{len(out['corridas'])} corridas, {len(out['cache'])} carpetas de caché, {len(out['borradores'])} borradores, {len(out['tmp'])} tmp"
+               + (" (dry-run: nada borrado)" if dry_run else " borrados"))
+
+
 @app.command("migrar-datamart")
 def migrar_datamart(destino: Path = typer.Option(..., help="Carpeta del datamart diario en el share (REPORTERIA_DATAMART)"),
                     origen: Path | None = typer.Option(None, help="Datamart mensual a migrar (default: el del paquete, v2/datamart)"),

@@ -167,6 +167,26 @@ def aplicar(raiz: Path, fecha: str, numero: int, motivo: str, ts: str, readiness
     return conteo
 
 
+def marcar_sin_corrida(raiz: Path, fecha: str, esperados_: list[int], bloqueo: str, ts: str, motivo: str = "nocturna") -> dict:
+    """Fecha sin corrida (CUBO ausente o inválido, REGLAS inválido): cada fondo esperado queda SIN_CORRIDA con ese bloqueo y sin
+    puntero. Idempotente noche a noche (mismo bloqueo → solo se actualiza `ts`); un fondo que ya apunta a una corrida no se toca."""
+    est = DM.leer_estado(raiz, fecha)
+    n = 0
+    for fid in esperados_:
+        f = est["fondos"].setdefault(str(fid), {"historial": []})
+        if f.get("corrida") is not None or f.get("estado") in OFICIALES:
+            continue
+        if f.get("estado") == "SIN_CORRIDA" and f.get("bloqueos") == [bloqueo]:
+            f["ts"] = ts
+            continue
+        f["historial"].append({"corrida": None, "estado": "SIN_CORRIDA", "motivo": motivo, "ts": ts, "bloqueos": [bloqueo]})
+        f.update(corrida=None, estado="SIN_CORRIDA", bloqueos=[bloqueo], ts=ts)
+        n += 1
+    est["esperados"] = [int(x) for x in esperados_]
+    DM.escribir_estado(raiz, fecha, est)
+    return {"SIN_CORRIDA": len(esperados_), "nuevos": n}
+
+
 def estado_fondos(raiz: Path, fecha: str) -> pd.DataFrame:
     """Estado por fondo de una fecha (layout diario desde estado.json; layout cierres/: todos los fondos de la última versión)."""
     est = DM.leer_estado(raiz, fecha)

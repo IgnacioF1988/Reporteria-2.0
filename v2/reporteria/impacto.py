@@ -242,9 +242,10 @@ def resumen_impacto(imp: pd.DataFrame) -> pd.DataFrame:
 
 
 def recalcular(rutas: Rutas, motivo: str, con_terminal: bool = False, refrescar: set[str] | None = None, refrescar_facts: bool = False,
-               bbg=None, fx=None, facts=None, log=None) -> DMV.Version:
+               bbg=None, fx=None, facts=None, log=None, sin_cargar_maestros: bool = False) -> DMV.Version:
     """Vuelve a correr `rutas.fecha` con la verdad actual (maestros as-of, dim, REGLAS, código) y los insumos sin fecha de la
-    versión vigente (salvo `refrescar`), y lo publica como REEXPRESADA. Sin terminal, lo no cacheado queda PENDIENTE_TERMINAL."""
+    versión vigente (salvo `refrescar`), y lo publica como REEXPRESADA. Sin terminal, lo no cacheado queda PENDIENTE_TERMINAL.
+    `sin_cargar_maestros`: no abrir el BIX (la nocturna ya registró la carga; la estación con terminal nunca escribe maestros)."""
     from .pipeline import Opciones, correr
     v = DMV.ultima_verdad(rutas.datamart, rutas.fecha)
     if v is None:
@@ -264,7 +265,7 @@ def recalcular(rutas: Rutas, motivo: str, con_terminal: bool = False, refrescar:
             if c in facturas.columns:
                 facturas[c] = pd.to_datetime(facturas[c], errors="coerce")
     opc = Opciones(sin_bbg=not con_terminal, sin_sql=True, sin_facts=facturas is not None, bbg=bbg, fx=fx, facts=facts,
-                   facturas=facturas, motivo=motivo)
+                   facturas=facturas, motivo=motivo, sin_cargar_maestros=sin_cargar_maestros)
     res = correr(r2, opc)
     return DMV.publicar(rutas.datamart, rutas.fecha, res.borrador, motivo, reexpresar=True, modo=rutas.modo)
 
@@ -276,7 +277,8 @@ def _a_reexpresar(imp: pd.DataFrame | None) -> pd.DataFrame:
 
 
 def reexpresar_impactados(rutas: Rutas, imp: pd.DataFrame, excluir: set[str] | None = None, con_terminal: bool = False,
-                          sin_cadena: bool = False, log=None, bbg_factory=None, fx=None, hoy: str | None = None) -> list[DMV.Version]:
+                          sin_cadena: bool = False, log=None, bbg_factory=None, fx=None, hoy: str | None = None,
+                          sin_cargar_maestros: bool = False) -> list[DMV.Version]:
     """Re-expresa en orden cronológico cada cierre con impacto de acción REEXPRESAR (menos `excluir`); tras cada uno vuelve a
     evaluar la cadena. Lo marcado (MARCAR: código, REGLAS globales fuera de la política) se deja para `recalcular --desde`."""
     hechos = []
@@ -290,8 +292,10 @@ def reexpresar_impactados(rutas: Rutas, imp: pd.DataFrame, excluir: set[str] | N
         vistos.add(f)
         motivo = "; ".join(f"{c}×{n}" for c, n in imp[imp["cierre"].eq(f)].groupby("consecuencia").size().items()) or "cadena"
         rf = rutas_de(rutas, f)
-        v = recalcular(rf, f"auto: {motivo}", con_terminal, bbg=bbg_factory(rf) if bbg_factory else None, fx=fx, log=log)
+        v = recalcular(rf, f"auto: {motivo}", con_terminal, bbg=bbg_factory(rf) if bbg_factory else None, fx=fx, log=log,
+                       sin_cargar_maestros=sin_cargar_maestros)
         hechos.append(v)
+        sin_cargar_maestros = True                      # la primera re-expresión ya registró la carga del BIX
         if log:
             log.info("re-expresado %s (%s)", v.etiqueta, v.completitud)
         if not sin_cadena:

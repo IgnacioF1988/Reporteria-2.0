@@ -40,6 +40,9 @@ reporteria comparar --fecha F --version-a 1 --version-b 2       # diferencias en
 reporteria maestros cargar | cambios | estado --llave PK2        # BD_INSTRUMENTOS/HOMOL bitemporales (la carga la hace `correr` solo)
 reporteria declarar --llave PK2 --columna C --valor V --desde F  # el cambio rige desde F (no es corrección retroactiva)
 reporteria impacto [--fecha F] [--detalle] | recalcular --fecha F [--con-terminal] [--motivo "…"] | pendientes [--fecha F]
+reporteria diario [--hoy D] [--hasta D] [--dry-run]              # modo diario: nocturna (corre, publica por fondo-día, re-evalúa, re-expresa, Teams)
+reporteria cierre-mensual --fecha F [--destino DIR] [--forzar]    # modo diario: copia el fin de mes del share al datamart de git
+reporteria limpiar --dias 400 [--hoy D] [--dry-run]              # modo diario: retención de corridas superadas, caché y borradores
 ```
 El paso a paso del operador está en [`CHECKLIST_CIERRE.md`](CHECKLIST_CIERRE.md).
 Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input obligatorio o REGLAS inválido.
@@ -155,6 +158,36 @@ sin caso especial. En modo diario:
   globales solo marcan;
 - `impacto` evalúa solo los últimos `ventana_reexpresion_dias` (60) días; `impacto --todos` los evalúa todos.
 
+**Orquestación nocturna (H10d).** `reporteria diario [--hoy D] [--hasta D] [--dry-run]` (`orquestacion.diario`) es la tarea programada
+del servidor sin Bloomberg, todos los días: candado `.lock` (exit 3 si otro proceso lo tiene vigente; vence a `lock_horas`, 6) →
+borra `corrida=*.tmp` interrumpidas → `calendario.pendientes` desde `max(hoy − ventana, nocturna_desde)` (parámetro de REGLAS; sin él,
+desde la primera fecha con corrida) → por cada fecha `LISTA` en orden: `correr(sin_bbg, sin Excel)` + `publicar(modo diario)`;
+`SIN_CUBO` ya esperada: todos los esperados quedan `SIN_CORRIDA(SIN_CUBO)` sin corrida y la fecha se vuelve a mirar cada noche;
+`AUN_NO_ESPERADA`: silencio; CUBO o REGLAS inválidos: esa fecha no existe, esperados `SIN_CORRIDA(CUBO_INVALIDO|REGLAS_INVALIDO: …)`,
+se avisa y se sigue con las demás → **re-evaluación** de las fechas de la ventana con fondos sin publicar cuyo bloqueo ya tiene
+remedio (`INSUMO_FALTANTE:X` y hoy `X` existe; `PENDIENTE_TERMINAL` y la caché Bloomberg de esa fecha cambió tras una pasada con
+terminal): `recalcular` de esa fecha, que publica lo que se destraba → `impacto` de la ventana y `reexpresar_impactados` (lo marcado
+queda listado) → `estado_diario_{hoy}.md` en `03_LOGS/` y `<datamart>/estado/` → Teams. El BIX se lee una vez por noche (la primera
+corrida registra la carga de maestros; las siguientes y los `recalcular` van con `sin_cargar_maestros`, que ya no abre el BIX cuando
+hay base). Códigos: `0` ningún fondo-día de la ventana sin publicar · `1` queda alguno PROVISORIO/SIN_CORRIDA · `2` fallo de
+infraestructura (dimensionales ilegibles, excepción no clasificada en una corrida) · `3` candado ajeno. `--dry-run` solo muestra el
+plan (pendientes, re-evaluaciones con disparador, backlog) y deja el JSON de Teams sin tocar el datamart. Log propio en
+`03_LOGS/diario/diario_{ts}.log`; los de cada corrida siguen en `03_LOGS/{F}/`.
+
+`notificacion.teams(resumen, TEAMS_WEBHOOK_URL, 03_LOGS)`: Adaptive Card (`{"type":"message","attachments":[…]}`, sirve para el
+conector clásico y para los flujos de Power Automate) con el titular por código, una línea por fecha, re-evaluaciones,
+re-expresiones, lo marcado, el backlog de la ventana agrupado por fecha/estado/bloqueo y los errores; siempre deja
+`03_LOGS/teams_{ts}.json`; sin URL avisa y sigue; un POST fallido nunca cambia el código de salida. Si la noche no tuvo nada que
+informar (solo `AUN_NO_ESPERADA`, sin backlog) no se envía.
+
+`reporteria cierre-mensual --fecha F [--destino v2/datamart] [--forzar]` copia la **última corrida** de F (último día calendario del
+mes; por construcción contiene la última verdad de todos los fondos) a `cierres/cierre=F/version=NNN` del datamart de git con
+`publicacion.json` (origen, estado por fondo) y marca `cierre_mensual=true` en el `estado.json` del share; se niega (exit 1) si algún
+fondo esperado no está PUBLICADA/REEXPRESADA salvo `--forzar`; es idempotente (la misma corrida no se copia dos veces). Después:
+`git add datamart && git commit`. `reporteria limpiar --dias N [--hoy D] [--dry-run]` borra, para fechas anteriores a hoy−N, las
+corridas que ningún fondo apunta ni fue nunca oficial (toda PUBLICADA/REEXPRESADA histórica se conserva), las carpetas de caché
+(`REPORTERIA_CACHE/F`) y los borradores de `02_OUTPUTS/F`, más los `.tmp`.
+
 ## Impacto y re-expresión (`impacto`, `recalcular`, `pendientes`)
 Cada `correr` termina evaluando el **impacto** de la verdad actual sobre la última verdad de cada cierre publicado: atributos del
 maestro usados vs as-of hoy (consecuencia CLASIFICACION, HEDGE, FUENTE, IDENTIDAD), dimensionales re-resueltas (DIM), hojas de REGLAS
@@ -235,7 +268,7 @@ Cómo se usa:
 | `overrides_valor` | `ID_Fund, ID_Instrumento, SubID_Instrumento, Yield, Duration, Fecha_Desde, Fecha_Fin`. Pisa todo. |
 | `overrides_atributo` | Mismo esquema que `EXCEPCIONES.xlsx` corporativo: `ID_Fund, ID_Instrumento, SubID_Instrumento, Field, Value, Fecha_Desde, Fecha_Fin`. |
 | `alertas` | Reglas del motor de alertas (campo, operador, umbral, severidad). |
-| `parametros` | Umbrales globales (`yield_max_proveedor`, `factura_tolerancia_monto`, `yield_type_default`, `ra_unico_factor` = 12: RA entrega los depósitos con TIR base 30 días, `yield_def` = 0 y `duracion_def` = 0.5 para DEF/PROPDEF, `factura_morosa_duration` = 0, …). |
+| `parametros` | Umbrales globales (`yield_max_proveedor`, `factura_tolerancia_monto`, `yield_type_default`, `ra_unico_factor` = 12: RA entrega los depósitos con TIR base 30 días, `yield_def` = 0 y `duracion_def` = 0.5 para DEF/PROPDEF, `factura_morosa_duration` = 0, …) y de la operación diaria (`insumos_obligatorios`, `ventana_reexpresion_dias`, `reexpresar_por`, `nocturna_desde`, `lock_horas`). |
 
 ## Alertas (REGLAS/alertas)
 Cada fila es `Campo Operador Umbral` sobre una columna de `cartera_final` o una derivada. Operadores: `>= <= > < igual distinto

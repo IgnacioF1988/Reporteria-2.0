@@ -30,6 +30,26 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
 8c. Al final de `correr` sale el impacto sobre los cierres ya publicados y, si lo hay, se re-expresan solos (`impacto … ×N`, `re-expresado F vNNN`). Si una re-expresión queda `PARCIAL`, `reporteria pendientes` dice qué falta y `reporteria recalcular --fecha F --con-terminal` lo cierra con la terminal abierta. Todo eso va en el `git add datamart` del cierre.
 9. Publicar: `reporteria publicar --fecha F` (toma el último borrador de `02_OUTPUTS\F\borradores`; con `--borrador TS` otro) → `git add datamart`, commit, push. Esa versión es lo reportado y queda congelada; el cierre siguiente la usa como cierre anterior (hedge heredado y alertas A05–A07). Si después hay que corregir el cierre: volver a correr y `publicar --reexpresar --motivo "qué cambió"` (nueva versión; `reporte --fecha F --publicada` sigue dando la original). `reporteria versiones` muestra lo que hay.
 
+## Operación diaria (modo diario, H10d; el switch por defecto llega con H10e)
+Servidor nocturno sin Bloomberg, `.env` con `REPORTERIA_MODO=diario`, `REPORTERIA_DATAMART=<share>\datamart`, `REPORTERIA_CACHE=<share>\04_CACHE`
+y, si se quiere el aviso, `TEAMS_WEBHOOK_URL` (webhook entrante del canal). Una sola vez: `reporteria migrar-datamart --destino <share>\datamart`
+y en `REGLAS/parametros` la fila `nocturna_desde = YYYYMMDD` (primer cierre que debe procesar la nocturna; sin ella arranca en la primera
+fecha con corrida y, si no hay ninguna, en hoy−1).
+1. Tarea programada diaria (Task Scheduler, p. ej. 02:00): `reporteria diario`. Procesa todos los cierres pendientes hasta ayer (el lunes:
+   viernes, sábado y domingo), publica por fondo-día, re-evalúa los provisorios cuyo insumo llegó, re-expresa impactos y avisa por Teams.
+   Exit `0` todo publicado · `1` quedan fondos sin publicar en la ventana · `2` fallo de infraestructura · `3` otra nocturna en curso.
+2. Qué mirar en Teams / `03_LOGS\estado_diario_{hoy}.md` (copia en `<share>\datamart\estado\`): la línea de cada fecha (publicados /
+   provisorios con su bloqueo / sin posiciones), `sin CUBO (se esperaba el …)` = Geneva no entregó, `SIN CORRIDA — CUBO_INVALIDO` =
+   archivo roto o a medio copiar (se reintenta solo cada noche al corregirlo), la tabla de backlog y lo **marcado** (código o REGLAS
+   globales: `reporteria recalcular --desde F --motivo "..."` a mano). `reporteria estado --fecha F` da el detalle por fondo.
+3. Insumo que llega tarde (JPM, RA, curvas, FACTURAS): dejarlo en `01_INPUTS\MERCADO` con su fecha; la noche siguiente la fecha se
+   re-evalúa sola y los fondos pasan a PUBLICADA. Pendientes de terminal: pasada BBG en la estación (H10e).
+4. Antes de la primera nocturna o tras un cambio grande: `reporteria diario --dry-run` muestra el plan sin tocar nada (y deja el JSON de
+   Teams en `03_LOGS`). `reporteria diario --hoy 20260803` simula la nocturna de otro día (procesa hasta el 2).
+5. Fin de mes: cuando el último día calendario esté 100 % publicado, `reporteria cierre-mensual --fecha F` (exit 1 si hay fondos sin
+   publicar; `--forzar` copia igual y deja el estado por fondo en `publicacion.json`) → `git add datamart` + commit + push.
+6. Retención, una vez al mes: `reporteria limpiar --dias 400 --dry-run` (revisar) y luego sin `--dry-run`.
+
 ## Versiones
 - `xbbg` 0.7 y ≥ 1.0 funcionan (el adaptador detecta la versión). La 1.x necesita `pyarrow>=22` (viene en el extra `bbg`); si aparece `Backend 'pyarrow' requires pyarrow >= 22`, correr `py -3.12 -m pip install --user --upgrade "pyarrow>=22"`.
 - Si `python` abre la Microsoft Store, usar `py -3.12 -m reporteria.cli ...` (o la versión 3.11+ instalada: `py -0` las lista).
@@ -42,7 +62,7 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
   `--sin-bbg`, la corrida termina con `BBG_SIN_CONEXION` CRÍTICA y pendientes a terminal, nunca con "sin dato" falsos en la caché.
 
 ## Códigos de salida
-`0` OK · `1` OK con alertas CRÍTICAS · `2` falta un input obligatorio o REGLAS inválido · `comparar`: `1` = hay diferencias.
+`0` OK · `1` OK con alertas CRÍTICAS · `2` falta un input obligatorio o REGLAS inválido · `comparar`: `1` = hay diferencias · `diario`: `0` todo publicado, `1` backlog, `2` infraestructura, `3` candado ajeno.
 
 ## Si algo falla
 - `INSUMO_FALTANTE` en alertas: el archivo opcional no estaba; la corrida sigue sin esa fuente.

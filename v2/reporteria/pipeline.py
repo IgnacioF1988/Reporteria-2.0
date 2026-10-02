@@ -54,6 +54,7 @@ class Opciones:
     facturas: pd.DataFrame | None = None   # facturas_al_cierre ya calculadas (re-expresión desde insumos/ de una versión)
     motivo: str = ""                  # re-expresión: por qué (queda en corrida.json)
     excel: bool = True                # escribir REPORTE_{F}.xlsx (en modo diario se genera a pedido con `reporte`)
+    cubo: pd.DataFrame | None = None  # CUBO ya leído (la nocturna lo valida antes para distinguir CUBO_INVALIDO de otros errores)
 
 
 @dataclass
@@ -148,16 +149,19 @@ def _reglas_aplicadas(pos: pd.DataFrame, reglas) -> pd.DataFrame:
 def _maestros(rutas: Rutas, opciones: Opciones, log, al: list) -> tuple[dict[str, pd.DataFrame], dict]:
     """BD_INSTRUMENTOS / HOMOL bitemporales: carga automática al datamart (base la primera vez, deltas después) y
     tabla as-of del cierre según lo conocido a `opciones.conocimiento`. Sin BIX a mano se usa el estado del datamart."""
-    vivos = {}
-    if Path(rutas.bd_instr).exists():
-        vivos["bd_instrumentos"] = M.leer_bd_instrumentos(rutas.bd_instr)
-    if Path(rutas.homol).exists():
-        vivos["homol_instrumentos"] = M.leer_homol(rutas.homol)
-    if Path(rutas.homol_funds).exists():
-        vivos["homol_funds"] = M.leer_homol_funds(rutas.homol_funds)
     raiz = rutas.datamart
     base_id, base = DM.leer_base(raiz, opciones.conocimiento)
     info = {"base": base_id, "carga": None, "cambios": {}, "conocimiento": opciones.conocimiento}
+    vivos = {}
+    if opciones.sin_cargar_maestros and base_id is not None:      # solo lectura: el BIX (240k+370k filas) no se abre
+        log.info("MAESTROS: sin leer el BIX (sin_cargar_maestros); estado del datamart, base %s", base_id)
+    else:
+        if Path(rutas.bd_instr).exists():
+            vivos["bd_instrumentos"] = M.leer_bd_instrumentos(rutas.bd_instr)
+        if Path(rutas.homol).exists():
+            vivos["homol_instrumentos"] = M.leer_homol(rutas.homol)
+        if Path(rutas.homol_funds).exists():
+            vivos["homol_funds"] = M.leer_homol_funds(rutas.homol_funds)
     if base_id is None:
         if "bd_instrumentos" not in vivos:
             raise FileNotFoundError(f"Input obligatorio BD_INSTRUMENTOS no encontrado: {rutas.bd_instr} (y el datamart no tiene base de maestros)")
@@ -181,7 +185,7 @@ def _maestros(rutas: Rutas, opciones: Opciones, log, al: list) -> tuple[dict[str
             al.append(alertas.emitir("MAESTRO_CAMBIOS", "INFO", detalle=f"carga {carga}: {info['cambios']}", ambito="CORRIDA"))
         else:
             log.info("MAESTROS: BIX igual al estado del datamart (base %s, %d cambios previos)", base_id, len(cambios))
-    elif not vivos:
+    elif not vivos and not opciones.sin_cargar_maestros:
         log.warning("MAESTROS: BIX no accesible; se usa el estado del datamart (base %s, %d cambios)", base_id, len(cambios))
     vig = DM.leer_vigencias(raiz)
     tablas = {t: MH.maestro_asof(t, base.get(t), cambios, vig, rutas.fecha, opciones.conocimiento) for t in MH.TABLAS}
@@ -251,7 +255,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
             raise FileNotFoundError(f"Input obligatorio {nombre} no encontrado: {ruta}")
     al: list[pd.DataFrame] = []
 
-    cubo = leer_cubo(rutas.cubo)
+    cubo = opciones.cubo if opciones.cubo is not None else leer_cubo(rutas.cubo)
     dims = DIM.leer(rutas.dim)
     bd_funds = dims.bd_funds()
     nf = int(dims.clasificacion["ID_Fund"].notna().sum())
