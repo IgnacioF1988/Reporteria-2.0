@@ -355,6 +355,40 @@ def copiar_insumos(rutas, dir_: Path, derivados: dict[str, pd.DataFrame] | None 
     return hashes
 
 
+# ── vistas DuckDB sobre el datamart (consulta, BI provisional) ─────────────────────────────────────────────────────────
+def vistas(raiz: Path):
+    """Conexión DuckDB en memoria con: `corridas` (una fila por versión/corrida), `estado` (fecha × fondo: estado, corrida,
+    publicada, bloqueos), `posiciones_diarias` (todas las posiciones de todas las corridas, con fecha y corrida),
+    `publicadas` (solo lo oficial: corrida = publicada del fondo) y `ultima_verdad` (corrida = puntero del fondo, incluye PROVISORIO)."""
+    from ..publicacion import COLS_ESTADO, estado_todos
+    duckdb = _duckdb()
+    con = duckdb.connect()
+    corr = listar_versiones(raiz)
+    if corr.empty:
+        corr = pd.DataFrame(columns=["cierre", "version", "ruta", "estado", "motivo", "ts", "completitud", "layout"])
+    con.register("corridas_df", corr.rename(columns={"cierre": "fecha", "version": "corrida"}))
+    con.execute("CREATE VIEW corridas AS SELECT fecha, CAST(corrida AS INTEGER) AS corrida, estado, motivo, ts, completitud, layout, ruta FROM corridas_df")
+    est = estado_todos(raiz)
+    if est.empty:
+        est = pd.DataFrame(columns=COLS_ESTADO)
+    est = est.astype({"corrida": "Int64", "publicada": "Int64", "ID_Fund": "Int64"})
+    con.register("estado_df", est)
+    con.execute("CREATE VIEW estado AS SELECT fecha, CAST(ID_Fund AS INTEGER) AS ID_Fund, estado, CAST(corrida AS INTEGER) AS corrida, "
+                "CAST(publicada AS INTEGER) AS publicada, bloqueos, ts, motivo FROM estado_df")
+    partes = [f"SELECT '{f['cierre']}' AS fecha, {int(f['version'])} AS corrida, * "
+              f"FROM read_parquet('{(Path(f['ruta']) / (TABLA_POSICIONES + '.parquet')).as_posix()}', hive_partitioning=false)"
+              for _, f in corr.iterrows() if (Path(f["ruta"]) / (TABLA_POSICIONES + ".parquet")).exists()]
+    if partes:
+        con.execute("CREATE VIEW posiciones_diarias AS " + " UNION ALL BY NAME ".join(partes))
+    else:
+        con.execute("CREATE VIEW posiciones_diarias AS SELECT '' AS fecha, 0 AS corrida, 0 AS ID_Fund, '' AS Pos_ID WHERE false")
+    con.execute("CREATE VIEW publicadas AS SELECT p.* FROM posiciones_diarias p JOIN estado e "
+                "ON e.fecha = p.fecha AND e.ID_Fund = p.ID_Fund AND e.publicada = p.corrida")
+    con.execute("CREATE VIEW ultima_verdad AS SELECT p.*, e.estado AS estado_fondo, e.bloqueos FROM posiciones_diarias p JOIN estado e "
+                "ON e.fecha = p.fecha AND e.ID_Fund = p.ID_Fund AND e.corrida = p.corrida")
+    return con
+
+
 # ── maestros: base + cambios por carga; declaraciones de vigencia ───────────────────────────────────────────────────────
 def id_carga(ts=None) -> str:
     import datetime as dt

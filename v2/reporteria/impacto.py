@@ -22,7 +22,7 @@ from .config import Rutas
 from .lectura.maestros import COLS_INSTR
 from .modelo import CODIGOS, limpiar_txt
 
-COLS_IMPACTO = ["cierre", "version", "Pos_ID", "atributo", "antes", "despues", "consecuencia"]
+COLS_IMPACTO = ["cierre", "version", "fondo", "Pos_ID", "atributo", "antes", "despues", "consecuencia"]
 CONSECUENCIA = {**{c: "CLASIFICACION" for c in CODIGOS + ["Emision_nacional"]},
                 "Risk_Currency": "HEDGE", "Risk_Country": "HEDGE", "ISIN": "FUENTE", "Yield_Type": "FUENTE", "Name_Instrumento": "FUENTE",
                 "Issue_Currency": "FUENTE", "CompanyName": "FUENTE"}
@@ -30,7 +30,10 @@ INSUMOS_FECHADOS = ("CUBO", "JPM", "Carga_Indexes", "CurvasSoberanas")        # 
 
 
 def _fila(cierre, version, pos_id, atributo, antes, despues, consecuencia):
-    return dict(cierre=cierre, version=version, Pos_ID=pos_id, atributo=atributo, antes=MH._celda(antes), despues=MH._celda(despues), consecuencia=consecuencia)
+    """`fondo` = ID_Fund del Pos_ID (`ID_Fund|PK2|BalanceSheet`); vacío en las filas globales (REGLAS, código, insumos, cadena)."""
+    fondo = int(str(pos_id).split("|")[0]) if pos_id and str(pos_id).split("|")[0].isdigit() else None
+    return dict(cierre=cierre, version=version, fondo=fondo, Pos_ID=pos_id, atributo=atributo, antes=MH._celda(antes), despues=MH._celda(despues),
+                consecuencia=consecuencia)
 
 
 def impacto_version(rutas: Rutas, v: DMV.Version, maestros: dict[str, pd.DataFrame], dims, hash_codigo: str, anterior: DMV.Version | None) -> pd.DataFrame:

@@ -86,7 +86,8 @@ def publicar(raiz: Path, fecha: str, borrador: Path, motivo: str = "", reexpresa
     """Copia el borrador al datamart como nueva versión. La primera es PUBLICADA; las siguientes exigen `reexpresar` y quedan REEXPRESADA.
 
     `modo="mensual"`: `cierres/cierre=F/version=NNN` + publicacion.json (layout en git). `modo="diario"`: `diario/fecha=F/corrida=NNN`
-    + estado.json con todos los fondos de la corrida apuntando a ella (H10b afina el estado por fondo)."""
+    + estado.json con el puntero de cada fondo según su readiness (`publicacion.aplicar`): PUBLICADA / REEXPRESADA solo si la
+    cartera del fondo cambió / PROVISORIO con bloqueos / SIN_CORRIDA."""
     corrida = DM.leer_corrida(borrador)
     if str(corrida.get("fecha", fecha)) != str(fecha):
         raise ValueError(f"el borrador es del cierre {corrida.get('fecha')}, no de {fecha}")
@@ -107,14 +108,11 @@ def publicar(raiz: Path, fecha: str, borrador: Path, motivo: str = "", reexpresa
     entrada = {"version": numero, "estado": estado, "motivo": motivo, "ts": ts, "borrador": Path(borrador).name,
                "code_hash": corrida.get("hashes", {}).get("codigo", ""), "completitud": corrida.get("completitud", "COMPLETA")}
     if modo == "diario":
+        from . import publicacion
         est = DM.leer_estado(raiz, fecha)
         est["corridas"][f"{numero:03d}"] = entrada
-        pos = DM.leer_posiciones(destino)
-        for fid in (sorted(int(x) for x in pos["ID_Fund"].dropna().unique()) if pos is not None else []):
-            f = est["fondos"].setdefault(str(fid), {"historial": []})
-            f["historial"].append({"corrida": numero, "estado": estado, "motivo": motivo, "ts": ts, "bloqueos": []})
-            f.update(corrida=numero, estado=estado)
         DM.escribir_estado(raiz, fecha, est)
+        entrada["fondos"] = publicacion.aplicar(raiz, fecha, numero, motivo, ts)          # puntero por fondo según su readiness
     else:
         hist = DM.leer_publicacion(raiz, fecha)
         hist.append(entrada)

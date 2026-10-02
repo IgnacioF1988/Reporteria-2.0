@@ -85,6 +85,12 @@ def _estado_datamart(r: Rutas) -> list[str]:
            f"cierre {r.fecha}: {est}; borradores sin publicar: {len(bor)}"]
     if (Path(r.datamart) / ".lock").exists():
         out.append(f"[AVISO] datamart con candado: {(Path(r.datamart) / '.lock').read_text(encoding='utf-8')}")
+    if r.modo == "diario" and vs:
+        from .publicacion import estado_fondos
+        t = estado_fondos(r.datamart, r.fecha)
+        no = t[~t["estado"].isin(("PUBLICADA", "REEXPRESADA"))] if len(t) else t
+        out.append(f"[{'OK ' if no.empty else 'AVISO'}] fondos {r.fecha}: {len(t) - len(no)} publicados, {len(no)} sin publicar"
+                   + (f" ({', '.join(f'{int(x.ID_Fund)}:{x.estado}' for x in no.itertuples())}) → reporteria estado --fecha {r.fecha}" if len(no) else ""))
     out.append(f"[OK ] caché {r.cache}")
     if bor and not vs:
         out.append(f"[AVISO] hay {len(bor)} borrador(es) del cierre {r.fecha} sin publicar → reporteria publicar --fecha {r.fecha}")
@@ -404,6 +410,28 @@ def versiones(fecha: str | None = typer.Option(None, help="Cierre YYYYMMDD (defa
         raise typer.Exit(0)
     for _, f in t.iterrows():
         typer.echo(f"  {f['cierre']}  v{int(f['version']):03d}  {f['estado']:12} {f['completitud'] or 'COMPLETA':9} {f['ts']:19}  anterior {f['anterior'] or '-':16} {f['motivo']}")
+
+
+@app.command()
+def estado(fecha: str = typer.Option(..., help="Fecha YYYYMMDD"), fondo: int | None = typer.Option(None, help="Solo ese ID_Fund"),
+           raiz: Path | None = None):
+    """Estado de publicación por fondo de una fecha: PUBLICADA / REEXPRESADA / PROVISORIO (con bloqueos) / SIN_CORRIDA y a qué corrida apunta."""
+    import pandas as pd
+    from .publicacion import estado_fondos
+    r = Rutas.desde_env(fecha, raiz)
+    t = estado_fondos(r.datamart, fecha)
+    if fondo is not None:
+        t = t[t["ID_Fund"].eq(fondo)]
+    if t.empty:
+        typer.echo(f"{fecha}: sin estado por fondo en {r.datamart}" + (f" para el fondo {fondo}" if fondo is not None else ""))
+        raise typer.Exit(0)
+    conteo = t["estado"].value_counts().to_dict()
+    typer.echo(f"{fecha}: " + ", ".join(f"{k} {v}" for k, v in sorted(conteo.items())))
+    for _, f in t.iterrows():
+        corrida = f"corrida {int(f['corrida']):03d}" if pd.notna(f["corrida"]) else "sin corrida"
+        pub = f"publicada {int(f['publicada']):03d}" if pd.notna(f["publicada"]) else "nunca publicada"
+        typer.echo(f"  {int(f['ID_Fund']):4}  {f['estado']:12} {corrida:12} {pub:18} {f['bloqueos'] or ''}")
+    raise typer.Exit(1 if conteo.get("PROVISORIO", 0) or conteo.get("SIN_CORRIDA", 0) else 0)
 
 
 @app.command()

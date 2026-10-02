@@ -119,8 +119,21 @@ automática, consulta por fecha de conocimiento) están en PLAN.md §5g.
 `REPORTERIA_MODO=diario` activa el layout `datamart/diario/fecha=F/corrida=NNN/` + `estado.json` (estado por fondo-día), pensado para
 un datamart en el share (`REPORTERIA_DATAMART`) con caché compartida (`REPORTERIA_CACHE`). Las escrituras son atómicas (carpeta `.tmp` y
 rename; una corrida sin `corrida.json` se ignora), hay candado de escritura (`.lock`) y `reporteria migrar-datamart --destino <share>`
-copia el datamart mensual de git al share. En modo `mensual` (default) todo sigue igual. `correr --sin-excel` deja solo el borrador;
-`REGLAS/alertas.Bloquea_Publicacion` (SI/NO, default NO) se lee pero aún no actúa.
+copia el datamart mensual de git al share. En modo `mensual` (default) todo sigue igual. `correr --sin-excel` deja solo el borrador.
+
+**Publicación por fondo-día (H10b).** Cada corrida termina con la hoja `publicacion` (una fila por fondo de la corrida y por fondo
+esperado = `Activo_MantenedorFondos=1` en `dim_fondos`): `Listo` y `Bloqueos`. Bloquean: insumo obligatorio ausente
+(`parametros.insumos_obligatorios`, default `CUBO`; p. ej. `CUBO;JPM`), posiciones `PENDIENTE_TERMINAL:n`, `COBERTURA:x<mínimo`
+(`cobertura_min_mv`), `AGREGADO_INCONSISTENTE` del fondo (ahora ámbito FONDO) y `ALERTA:<Nombre>` para las alertas con
+`Bloquea_Publicacion=SI` en REGLAS/alertas (la fila con `ID_Fund` manda sobre la global para ese fondo); un fondo esperado sin
+posiciones queda `FONDO_SIN_POSICIONES`. En modo diario `publicar` escribe en `estado.json` el **puntero de cada fondo**: listo y nunca
+publicado → `PUBLICADA`; listo y ya publicado → `REEXPRESADA` solo si su cartera cambió (`publicacion.fondos_cambiados`: Yield, Duration,
+Fuente, Conversion, Estado o posiciones), si no el puntero no se mueve; no listo → `PROVISORIO` apuntando a la corrida nueva (última
+verdad) y `publicada` sigue en la última oficial; sin posiciones → `SIN_CORRIDA`. Por eso `recalcular` re-apunta solo los fondos que
+cambiaron. `reporteria estado --fecha F [--fondo N]` lo muestra (exit 1 si hay PROVISORIO o SIN_CORRIDA) y `check` resume cuántos
+fondos están sin publicar. `impacto` trae ahora la columna `fondo`. Vistas DuckDB (`adaptadores/datamart.vistas(raiz)`): `corridas`,
+`estado`, `posiciones_diarias`, `publicadas` (solo lo oficial) y `ultima_verdad` (incluye PROVISORIO con `estado_fondo` y `bloqueos`);
+el layout mensual de git se lee como si todos los fondos de la última versión estuvieran publicados.
 
 ## Impacto y re-expresión (`impacto`, `recalcular`, `pendientes`)
 Cada `correr` termina evaluando el **impacto** de la verdad actual sobre la última verdad de cada cierre publicado: atributos del

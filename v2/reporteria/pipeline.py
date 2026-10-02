@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import agregados, alertas, cascada, clasificacion, datamart, dim, maestros_hist as MH, overrides, salida, universo
+from . import agregados, alertas, cascada, clasificacion, datamart, dim, maestros_hist as MH, overrides, publicacion, salida, universo
 from .config import MAX_DIAS_ATRAS_PARIDADES, RISK_COUNTRY_TO_LOCAL_CCY, STRONG_CCY, SUFIJOS_SERIE
 from .adaptadores import datamart as DM
 from .adaptadores import dim as DIM
@@ -377,7 +377,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     agg = agregados.aw_dw(pos)
     inconsistencias = agregados.verificar(agg)
     if len(inconsistencias):
-        al_inc = alertas.emitir("AGREGADO_INCONSISTENTE", "CRITICA", detalle="; ".join(inconsistencias["Problema"].astype(str)), ambito="CORRIDA")
+        al_inc = alertas.emitir("AGREGADO_INCONSISTENTE", "CRITICA", inconsistencias, detalle="Problema", ambito="FONDO", valor="Valor")
         todas = alertas.juntar(todas, al_inc)
     faltantes = pos[pos["Estado"].isin(["FALTANTE", "PENDIENTE_TERMINAL"])]
     pendientes = pos.loc[pos["Estado"].eq("PENDIENTE_TERMINAL"), ["Pos_ID", "ID_Fund", "Fondo", "PK2", "Name_Instrumento", "ISIN", "Bucket", "TotalMVal", "Pedido_BBG", "Motivo"]]
@@ -409,6 +409,11 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
                "alertas_inactivas": res_reglas.loc[~res_reglas["Estado"].eq("ACTIVA"), "Nombre"].tolist() if len(res_reglas) else [],
                "segundos": round(time.perf_counter() - t0, 1)}
     log.info("estado: %s | fuentes: %s", resumen["estado"], resumen["fuente"])
+    readiness = publicacion.evaluar(pos, todas, resumen, insumos, reglas.alertas, reglas.parametros, publicacion.esperados(dims.fondos))
+    resumen["publicacion"] = {"listos": [int(x) for x in readiness.loc[readiness["Listo"], "ID_Fund"]],
+                              "bloqueados": {int(r["ID_Fund"]): r["Bloqueos"] for _, r in readiness[~readiness["Listo"]].iterrows()}}
+    log.info("publicación por fondo: %d listos, %d con bloqueos %s", len(resumen["publicacion"]["listos"]), len(resumen["publicacion"]["bloqueados"]),
+             resumen["publicacion"]["bloqueados"] if resumen["publicacion"]["bloqueados"] else "")
     orden_sev = {"CRITICA": 0, "ALTA": 1, "MEDIA": 2, "INFO": 3}
     hojas = {
         "resumen": pd.DataFrame([(k, json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v) for k, v in resumen.items()],
@@ -428,6 +433,7 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
         "td_detalle": tds,
         "reglas_aplicadas": reglas_aplicadas,
         "insumos": insumos,
+        "publicacion": readiness,
     }
     excel = salida.escribir_excel(hojas, rutas.excel_final) if opciones.excel else None
     rutas.outputs.mkdir(parents=True, exist_ok=True)

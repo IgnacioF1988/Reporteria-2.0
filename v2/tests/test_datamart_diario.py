@@ -8,14 +8,14 @@ from reporteria import datamart as DMV
 from reporteria.adaptadores import datamart as DM
 
 
-def _hojas(fondos=(20, 16)):
-    pos = pd.DataFrame({"Pos_ID": [f"{f}|{i}-1|Asset" for i, f in enumerate(fondos)], "ID_Fund": list(fondos), "Yield": [0.05] * len(fondos),
+def _hojas(fondos=(20, 16), yld=0.05):
+    pos = pd.DataFrame({"Pos_ID": [f"{f}|{i}-1|Asset" for i, f in enumerate(fondos)], "ID_Fund": list(fondos), "Yield": [yld] * len(fondos),
                         "Estado": ["RESUELTO"] * len(fondos), "Fuente": ["JPM"] * len(fondos), "TotalMVal": [100.0] * len(fondos)})
     return {"cartera_final": pos, "alertas": pd.DataFrame({"Nombre": ["A"]})}, pos
 
 
-def _borrador(tmp_path, nombre, fecha="20260731"):
-    hojas, pos = _hojas()
+def _borrador(tmp_path, nombre, fecha="20260731", yld=0.05):
+    hojas, pos = _hojas(yld=yld)
     return DM.escribir_version(tmp_path / "b" / nombre, hojas, {"fecha": fecha, "ts": "2026-08-01 10:00:00", "estado": "BORRADOR", "completitud": "COMPLETA"}, pos)
 
 
@@ -40,9 +40,13 @@ def test_publicar_en_layout_diario_escribe_estado_por_fondo(tmp_path):
     est = DM.leer_estado(raiz, "20260731")
     assert est["corridas"]["001"]["estado"] == "PUBLICADA" and set(est["fondos"]) == {"20", "16"}
     assert est["fondos"]["20"]["corrida"] == 1 and est["fondos"]["20"]["historial"][0]["estado"] == "PUBLICADA"
-    v2 = DMV.publicar(raiz, "20260731", _borrador(tmp_path, "b2"), motivo="x", reexpresar=True, modo="diario")
-    assert v2.numero == 2 and DM.leer_estado(raiz, "20260731")["fondos"]["16"]["corrida"] == 2
-    assert DMV.resolver_version(raiz, "20260731", publicada=True).numero == 1 and DMV.ultima_verdad(raiz, "20260731").numero == 2
+    v2 = DMV.publicar(raiz, "20260731", _borrador(tmp_path, "b2", yld=0.06), motivo="x", reexpresar=True, modo="diario")
+    est = DM.leer_estado(raiz, "20260731")
+    assert v2.numero == 2 and est["fondos"]["16"]["corrida"] == 2 and est["fondos"]["16"]["estado"] == "REEXPRESADA" and est["fondos"]["16"]["publicada"] == 2
+    v3 = DMV.publicar(raiz, "20260731", _borrador(tmp_path, "b3", yld=0.06), motivo="igual", reexpresar=True, modo="diario")
+    est = DM.leer_estado(raiz, "20260731")
+    assert v3.numero == 3 and est["fondos"]["16"]["corrida"] == 2 and est["corridas"]["003"]["fondos"]["SIN_CAMBIO"] == 2   # idéntica: nadie se mueve
+    assert DMV.resolver_version(raiz, "20260731", publicada=True).numero == 1 and DMV.ultima_verdad(raiz, "20260731").numero == 3
     assert DMV.versiones_de(raiz, "20260731")[0].corrida["_layout"] == "diario"
     assert DM.fechas(raiz) == ["20260731"] and DM.cierres(raiz) == [] and DM.fechas_diario(raiz) == ["20260731"]
     # ambos layouts conviven: una versión mensual de otra fecha

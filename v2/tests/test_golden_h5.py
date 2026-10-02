@@ -12,7 +12,7 @@ from reporteria.config import Rutas
 from reporteria.pipeline import Opciones, correr
 
 HOJAS = ["resumen", "agregados", "alertas_resumen", "alertas", "faltantes", "plantilla_overrides", "plantilla_cajas", "plantilla_dim", "pendientes", "cartera_final", "candidatos",
-         "conversiones", "curvas_drop", "td_detalle", "reglas_aplicadas", "insumos"]
+         "conversiones", "curvas_drop", "td_detalle", "reglas_aplicadas", "insumos", "publicacion"]
 
 
 def _correr(r, fixtures):

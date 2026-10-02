@@ -52,6 +52,7 @@ def test_impacto_vacio_tras_publicar_y_detecta_maestro_dim_reglas_codigo_cadena(
     assert por.loc[(bono.name, "Risk_Currency"), "consecuencia"] == "HEDGE" and por.loc[(bono.name, "Risk_Currency"), "despues"] == "EUR"
     assert por.loc[(eq.name, "Investment_Type_Code"), "consecuencia"] == "CLASIFICACION"
     assert set(imp["consecuencia"]) == {"HEDGE", "CLASIFICACION"}
+    assert imp["fondo"].notna().all() and (imp["fondo"] == imp["Pos_ID"].str.split("|").str[0].astype(int)).all()      # H10b: impacto por fondo
     res_imp = IMP.resumen_impacto(imp)
     assert res_imp["N"].sum() == len(imp) and (res_imp["version"] == 1).all()
 
