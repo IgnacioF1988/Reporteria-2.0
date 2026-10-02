@@ -187,3 +187,40 @@ def comparar_versiones(a: Version, b: Version) -> pd.DataFrame:
     if pa is None or pb is None:
         raise ValueError("alguna de las versiones no tiene posiciones.parquet")
     return comparar_carteras(pa, pb)
+
+
+def reporte_mensual(raiz: Path, mes: str) -> dict[str, pd.DataFrame]:
+    """Hojas del reporte de un mes (YYYYMM) desde lo **publicado** de cada fondo-día: `resumen` (por fecha: fondos por estado y
+    cierre mensual), `estado` (fecha × fondo), `agregados` y `cartera` (una fila por fecha × posición oficial)."""
+    from .publicacion import OFICIALES, estado_fondos
+    from .salida import COLS_CARTERA
+    fechas = [f for f in DM.fechas(raiz) if f.startswith(str(mes))]
+    estados, carteras, agregados, resumen = [], [], [], []
+    for f in fechas:
+        est = estado_fondos(raiz, f)
+        if est.empty:
+            continue
+        estados.append(est)
+        conteo = est["estado"].value_counts().to_dict()
+        resumen.append({"Fecha": f, **{e: int(conteo.get(e, 0)) for e in ("PUBLICADA", "REEXPRESADA", "PROVISORIO", "SIN_CORRIDA")},
+                        "Cierre_Mensual": bool(DM.leer_estado(raiz, f).get("cierre_mensual", False))})
+        oficial = est[est["estado"].isin(OFICIALES) & est["publicada"].notna()]
+        for corrida, g in oficial.groupby("publicada"):
+            d = DM.dir_corrida(raiz, f, int(corrida))
+            d = d if d.exists() else DM.dir_version(raiz, f, int(corrida))
+            hojas, pos, _ = DM.leer_version(d)
+            fondos = set(int(x) for x in g["ID_Fund"])
+            if pos is not None and len(pos):
+                cols = [c for c in COLS_CARTERA if c in pos.columns]
+                carteras.append(pos.loc[pos["ID_Fund"].isin(fondos), cols].assign(Fecha=f, Corrida=int(corrida)))
+            agg = hojas.get("agregados")
+            if agg is not None and len(agg) and "ID_Fund" in agg.columns:
+                agregados.append(agg[agg["ID_Fund"].isin(fondos)].assign(Fecha=f, Corrida=int(corrida)))
+
+    def _junta(partes, primero):
+        if not partes:
+            return pd.DataFrame(columns=primero)
+        t = pd.concat(partes, ignore_index=True)
+        return t[primero + [c for c in t.columns if c not in primero]]
+    return {"resumen": pd.DataFrame(resumen, columns=["Fecha", "PUBLICADA", "REEXPRESADA", "PROVISORIO", "SIN_CORRIDA", "Cierre_Mensual"]),
+            "estado": _junta(estados, ["fecha"]), "agregados": _junta(agregados, ["Fecha", "Corrida"]), "cartera": _junta(carteras, ["Fecha", "Corrida"])}

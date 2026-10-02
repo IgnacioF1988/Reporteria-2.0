@@ -74,6 +74,7 @@ def _en(dirs: list[Path], nombre: str) -> Path:
 
 RAIZ_PAQUETE = Path(__file__).resolve().parents[1]          # v2/: TODO lo que el pipeline lee o escribe vive aquí (salvo CUBO y BIX, shares externos)
 DIM_DEFAULT = RAIZ_PAQUETE / "dim" / "dimensionales.duckdb"  # versionado en git (REPORTERIA_DIM lo cambia)
+MODO_DEFAULT = "diario"
 DATAMART_DEFAULT = RAIZ_PAQUETE / "datamart"                 # versiones publicadas, en git (REPORTERIA_DATAMART)
 
 
@@ -161,7 +162,7 @@ class Rutas:
         bix = Path(os.environ.get("RUTA_BIX") or inp / "CORPORATIVO")
         datamart = Path(os.environ.get("REPORTERIA_DATAMART") or DATAMART_DEFAULT)
         cache = Path(os.environ.get("REPORTERIA_CACHE") or raiz / "04_CACHE") / fecha     # en el share si lo comparten servidor y estación
-        modo = (os.environ.get("REPORTERIA_MODO") or "mensual").strip().lower()
+        modo = (os.environ.get("REPORTERIA_MODO") or MODO_DEFAULT).strip().lower()      # H10e: diario salvo que .env diga mensual
         if modo not in ("mensual", "diario"):
             raise ValueError(f"REPORTERIA_MODO={modo}: debe ser mensual o diario")
         return cls._armar(fecha, raiz, cubo_dir, [bix, bix / "DIMENSIONALES"], inp / "MERCADO", inp / "MANUALES",

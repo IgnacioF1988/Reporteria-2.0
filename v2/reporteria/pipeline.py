@@ -1,6 +1,7 @@
 """Orquestación: lee, clasifica, junta candidatos de cada fuente, elige, escribe. Todo en memoria."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 from dataclasses import dataclass, field
@@ -83,11 +84,18 @@ def _desde_maestro(nombre, ruta, tabla: pd.DataFrame, source: str | None, log, a
 
 
 def _opcional(nombre, ruta, lector, log, al):
+    """Insumo opcional: ausente → INSUMO_FALTANTE; ilegible (archivo roto, a medio copiar, columnas cambiadas) → INSUMO_INVALIDO y esa
+    fuente se apaga ese día en vez de abortar la corrida (H10e)."""
     if ruta is None or not Path(ruta).exists():
         log.warning("%s: no encontrado — se omite", nombre)
         al.append(alertas.emitir("INSUMO_FALTANTE", "ALTA", detalle=f"{nombre}: {ruta}", ambito="CORRIDA"))
         return None
-    return lector(ruta)
+    try:
+        return lector(ruta)
+    except Exception as e:                      # noqa: BLE001 — un insumo corrupto no tumba a los fondos que no lo necesitan
+        log.error("%s: ilegible (%s: %s) — se omite esa fuente", nombre, type(e).__name__, str(e)[:200])
+        al.append(alertas.emitir("INSUMO_INVALIDO", "ALTA", detalle=f"{nombre}: {Path(ruta).name}: {type(e).__name__}: {str(e)[:200]}", ambito="CORRIDA"))
+        return None
 
 
 def _facturas(opciones: Opciones, rutas: Rutas, log, al) -> pd.DataFrame | None:
@@ -266,7 +274,6 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     if rutas.modo == "diario":                      # `clave_diario` pisa a `clave` (umbrales de un día vs de un mes)
         diarios = {k[:-7]: v for k, v in reglas.parametros.items() if k.endswith("_diario")}
         if diarios:
-            import dataclasses
             reglas = dataclasses.replace(reglas, parametros={**reglas.parametros, **diarios})
             log.info("parámetros diarios: %s", diarios)
     log.info("CUBO: %d filas, fondos %s", len(cubo), sorted(cubo["ID_Fund"].unique()))
@@ -323,12 +330,18 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     par = _opcional("Paridades", rutas.paridades, lambda p: leer_paridades(p, rutas.settle, MAX_DIAS_ATRAS_PARIDADES), log, al) or {}
     fx_bee, fx_par = armar_fx(fx_bee, par)
     tds = pd.DataFrame()
+    flujos = None
     if rutas.excepciones:
-        flujos, a = leer_excepciones(rutas.excepciones, rutas.settle); al.append(a)
+        try:
+            flujos, a = leer_excepciones(rutas.excepciones, rutas.settle); al.append(a)
+        except Exception as e:                  # noqa: BLE001 — EXCEPCIONES corrupto: se apaga la fuente, no la corrida
+            log.error("EXCEPCIONES: ilegible (%s: %s) — se omite esa fuente", type(e).__name__, str(e)[:200])
+            al.append(alertas.emitir("INSUMO_INVALIDO", "ALTA", detalle=f"EXCEPCIONES: {type(e).__name__}: {str(e)[:200]}", ambito="CORRIDA"))
+    if flujos is not None:
         c, tds, a = candidatos_excepciones(pos, flujos, fx_bee, fx_par, rutas.settle, _escala_cfg(reglas.parametros))
         cands.append(c); al.append(a)
         log.info("EXCEPCIONES: %d PK2 con flujos, %d posiciones evaluadas", len(flujos), len(c))
-    else:
+    elif not rutas.excepciones:
         al.append(alertas.emitir("INSUMO_FALTANTE", "ALTA", detalle="EXCEPCIONES*.xlsx: ninguno en MANUALES", ambito="CORRIDA"))
     jpm = _opcional("JPM", rutas.jpm, leer_jpm, log, al)
     c, a = candidatos_jpm(pos, jpm); cands.append(c); al.append(a)
@@ -483,3 +496,41 @@ def _escribir_borrador(rutas: Rutas, opciones: Opciones, hojas: dict, pos: pd.Da
     DM.copiar_insumos(rutas, dir_, {"facturas_al_cierre": facturas} if facturas is not None else None)
     log.info("borrador %s (publicar con: reporteria publicar --fecha %s)", dir_.name, rutas.fecha)
     return dir_
+
+
+# ── aislamiento por fondo (nocturna): un fondo que revienta la corrida no frena a los demás ────────────────────────────
+def _bisectar(rutas: Rutas, opciones: Opciones, cubo: pd.DataFrame, fondos: list[int], log) -> dict[int, str]:
+    """Busca por bisección los fondos cuyo subconjunto hace fallar `correr`. Devuelve {ID_Fund: error}."""
+    sub = cubo[cubo["ID_Fund"].isin(fondos)]
+    try:
+        correr(rutas, dataclasses.replace(opciones, cubo=sub, sin_cargar_maestros=True, excel=False))
+        return {}
+    except Exception as e:                      # noqa: BLE001
+        if len(fondos) == 1:
+            if log:
+                log.error("fondo %s en cuarentena: %s: %s", fondos[0], type(e).__name__, str(e)[:200])
+            return {int(fondos[0]): f"{type(e).__name__}: {str(e)[:200]}"}
+        mitad = len(fondos) // 2
+        return {**_bisectar(rutas, opciones, cubo, fondos[:mitad], log), **_bisectar(rutas, opciones, cubo, fondos[mitad:], log)}
+
+
+def correr_aislado(rutas: Rutas, opciones: Opciones | None = None, log=None) -> tuple[Resultado, dict[int, str]]:
+    """`correr` con cuarentena por fondo: si el frame completo falla, bisecta por fondo, aísla a los culpables y vuelve a correr el
+    resto. Devuelve (Resultado, {ID_Fund culpable: error}). Si falla todo (CUBO/REGLAS/dim) o no hay un culpable aislable, relanza."""
+    opciones = opciones or Opciones()
+    cubo = opciones.cubo if opciones.cubo is not None else leer_cubo(rutas.cubo)
+    opciones = dataclasses.replace(opciones, cubo=cubo)
+    try:
+        return correr(rutas, opciones), {}
+    except Exception as e:                      # noqa: BLE001
+        fondos = sorted(int(x) for x in cubo["ID_Fund"].dropna().unique())
+        if len(fondos) <= 1:
+            raise
+        if log:
+            log.error("corrida completa falló (%s: %s): bisectando por fondo", type(e).__name__, str(e)[:200])
+        culpables = _bisectar(rutas, opciones, cubo, fondos, log)
+        if not culpables or len(culpables) == len(fondos):
+            raise
+        resto = cubo[~cubo["ID_Fund"].isin(culpables)]
+        res = correr(rutas, dataclasses.replace(opciones, cubo=resto, sin_cargar_maestros=True))   # la cuarentena queda en estado.json (ERROR_FONDO)
+        return res, culpables

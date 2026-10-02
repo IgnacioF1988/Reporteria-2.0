@@ -163,6 +163,7 @@ def aplicar(raiz: Path, fecha: str, numero: int, motivo: str, ts: str, readiness
             f["publicada"] = numero
         conteo[estado] += 1
     est["corridas"].setdefault(f"{numero:03d}", {}).update(fondos=conteo)
+    est["esperados"] = sorted(set(int(x) for x in est.get("esperados", [])) | {int(x) for x in rd["ID_Fund"]})   # fondos de la corrida ∪ esperados
     DM.escribir_estado(raiz, fecha, est)
     return conteo
 
@@ -182,7 +183,7 @@ def marcar_sin_corrida(raiz: Path, fecha: str, esperados_: list[int], bloqueo: s
         f["historial"].append({"corrida": None, "estado": "SIN_CORRIDA", "motivo": motivo, "ts": ts, "bloqueos": [bloqueo]})
         f.update(corrida=None, estado="SIN_CORRIDA", bloqueos=[bloqueo], ts=ts)
         n += 1
-    est["esperados"] = [int(x) for x in esperados_]
+    est["esperados"] = sorted(set(int(x) for x in est.get("esperados", [])) | {int(x) for x in esperados_})
     DM.escribir_estado(raiz, fecha, est)
     return {"SIN_CORRIDA": len(esperados_), "nuevos": n}
 

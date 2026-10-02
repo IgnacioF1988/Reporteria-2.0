@@ -43,6 +43,8 @@ reporteria impacto [--fecha F] [--detalle] | recalcular --fecha F [--con-termina
 reporteria diario [--hoy D] [--hasta D] [--dry-run]              # modo diario: nocturna (corre, publica por fondo-día, re-evalúa, re-expresa, Teams)
 reporteria cierre-mensual --fecha F [--destino DIR] [--forzar]    # modo diario: copia el fin de mes del share al datamart de git
 reporteria limpiar --dias 400 [--hoy D] [--dry-run]              # modo diario: retención de corridas superadas, caché y borradores
+reporteria pasada-bbg --todas | --fecha F [--hoy D]              # modo diario, estación con terminal: cierra PENDIENTE_TERMINAL y publica
+reporteria reporte --mes YYYYMM                                   # modo diario: Excel del mes con lo publicado de cada fondo-día
 ```
 El paso a paso del operador está en [`CHECKLIST_CIERRE.md`](CHECKLIST_CIERRE.md).
 Códigos de salida: 0 OK · 1 OK con alertas CRÍTICAS · 2 falta un input obligatorio o REGLAS inválido.
@@ -122,7 +124,7 @@ automática, consulta por fecha de conocimiento) están en PLAN.md §5g.
 `REPORTERIA_MODO=diario` activa el layout `datamart/diario/fecha=F/corrida=NNN/` + `estado.json` (estado por fondo-día), pensado para
 un datamart en el share (`REPORTERIA_DATAMART`) con caché compartida (`REPORTERIA_CACHE`). Las escrituras son atómicas (carpeta `.tmp` y
 rename; una corrida sin `corrida.json` se ignora), hay candado de escritura (`.lock`) y `reporteria migrar-datamart --destino <share>`
-copia el datamart mensual de git al share. En modo `mensual` (default) todo sigue igual. `correr --sin-excel` deja solo el borrador.
+copia el datamart mensual de git al share. En modo `mensual` (`REPORTERIA_MODO=mensual`; el default es `diario` desde H10e) todo sigue igual. `correr --sin-excel` deja solo el borrador.
 
 **Publicación por fondo-día (H10b).** Cada corrida termina con la hoja `publicacion` (una fila por fondo de la corrida y por fondo
 esperado = `Activo_MantenedorFondos=1` en `dim_fondos`): `Listo` y `Bloqueos`. Bloquean: insumo obligatorio ausente
@@ -187,6 +189,24 @@ fondo esperado no está PUBLICADA/REEXPRESADA salvo `--forzar`; es idempotente (
 `git add datamart && git commit`. `reporteria limpiar --dias N [--hoy D] [--dry-run]` borra, para fechas anteriores a hoy−N, las
 corridas que ningún fondo apunta ni fue nunca oficial (toda PUBLICADA/REEXPRESADA histórica se conserva), las carpetas de caché
 (`REPORTERIA_CACHE/F`) y los borradores de `02_OUTPUTS/F`, más los `.tmp`.
+
+**Pasada BBG, cuarentena por fondo y switch (H10e).** `reporteria pasada-bbg --fecha F [--fecha G] | --todas [--hoy D]`
+(`orquestacion.pasada_bbg`) se corre a mano en la estación con terminal: para cada fecha indicada (o cada fecha de la ventana con
+fondos `PENDIENTE_TERMINAL`) hace `recalcular --con-terminal` sin tocar maestros; `CacheBloomberg` pide a la terminal exactamente lo que
+falta en la caché compartida y persiste también los "sin dato", y la publicación por fondo destraba los fondos que ya no tienen
+pendientes (los demás no se mueven). Usa el mismo candado que la nocturna, deja `estado_diario_{hoy}_bbg.md` y avisa por Teams. Si
+xbbg no está o no carga en ese Python, sale con código 2 sin tocar nada. Códigos: `0` sin pendientes en la ventana · `1` quedan · `2`
+terminal/xbbg no disponible o fallo · `3` candado ajeno. La nocturna siguiente ve la caché cambiada (disparador `PENDIENTE_TERMINAL`)
+solo si algo quedó sin publicar.
+
+Aislamiento: en la nocturna `pipeline.correr_aislado` corre el frame completo y, si una excepción lo tumba, **bisecta por fondo**,
+pone en cuarentena a los culpables (`SIN_CORRIDA` con bloqueo `ERROR_FONDO: <error>` en `estado.json`, `cuarentena` en el informe y
+Teams) y vuelve a correr el resto; si falla todo (CUBO, REGLAS, dim) relanza y la fecha queda sin corrida como antes. Un insumo
+opcional ilegible (archivo roto o a medio copiar: JPM, RA, curvas, paridades, jsonl, EXCEPCIONES, FACTURAS Excel) ya no aborta la
+corrida: esa fuente se apaga ese día con la alerta ALTA `INSUMO_INVALIDO` (el fondo-día se publica igual salvo que el insumo sea
+obligatorio). `reporteria reporte --mes YYYYMM` genera `REPORTE_MES_YYYYMM.xlsx` con `resumen` (fondos por estado y cierre mensual por
+fecha), `estado` (fecha × fondo), `agregados` y `cartera` de lo **publicado** de cada fondo-día. **`REPORTERIA_MODO` vale `diario` por
+defecto**: quien siga operando el cierre mensual en git pone `REPORTERIA_MODO=mensual` en `.env` (`check` lo avisa).
 
 ## Impacto y re-expresión (`impacto`, `recalcular`, `pendientes`)
 Cada `correr` termina evaluando el **impacto** de la verdad actual sobre la última verdad de cada cierre publicado: atributos del

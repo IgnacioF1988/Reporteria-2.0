@@ -193,7 +193,7 @@ def diario(rutas_base: Rutas, hoy: str | None = None, hasta: str | None = None, 
            teams_url: str | None = None, log=None) -> Noche:
     """La nocturna completa. `rutas_base` es `Rutas.desde_env(hoy)` en modo diario; cada fecha deriva con `impacto.rutas_de`.
     `dry_run`: solo el plan (fechas pendientes, re-evaluaciones con disparador, backlog) y el JSON de Teams; no toca el datamart."""
-    from .pipeline import Opciones, correr
+    from .pipeline import Opciones, correr_aislado
     hoy = _txt(hoy or dt.date.today())
     raiz = rutas_base.datamart
     if rutas_base.modo != "diario":
@@ -259,11 +259,15 @@ def diario(rutas_base: Rutas, hoy: str | None = None, hasta: str | None = None, 
                 try:
                     opc = dataclasses.replace(opciones, sin_bbg=True, excel=False, sin_cargar_maestros=cargado[0], cubo=cubo,
                                               bbg=bbg_factory(rf) if bbg_factory else None, motivo=f"nocturna {hoy}")
-                    res = correr(rf, opc)
+                    res, culpables = correr_aislado(rf, opc, log=log)
                     cargado[0] = True
                     v = DMV.publicar(raiz, f, res.borrador, motivo=f"nocturna {hoy}", reexpresar=bool(DMV.versiones_de(raiz, f)), modo="diario")
-                    n.fechas.append(dict(fecha=f, estado="CORRIDA", corrida=v.numero, fondos=_conteo(raiz, f), bloqueos=_bloqueos_top(raiz, f)))
-                    log.info("%s → %s %s", f, v.etiqueta, n.fechas[-1]["fondos"])
+                    for fid, err in culpables.items():                  # en cuarentena: SIN_CORRIDA(ERROR_FONDO) solo ese fondo
+                        PUB.marcar_sin_corrida(raiz, f, [fid], f"ERROR_FONDO: {err}".replace(PUB.SEP, ",")[:200], ts)
+                        n.errores.append(f"{f}: fondo {fid} en cuarentena: {err}")
+                    n.fechas.append(dict(fecha=f, estado="CORRIDA", corrida=v.numero, fondos=_conteo(raiz, f), bloqueos=_bloqueos_top(raiz, f),
+                                         cuarentena=sorted(culpables)))
+                    log.info("%s → %s %s%s", f, v.etiqueta, n.fechas[-1]["fondos"], f" cuarentena {sorted(culpables)}" if culpables else "")
                     continue
                 except Exception as e:                  # noqa: BLE001 — esa fecha no existe; se sigue con las demás
                     tipo = _clasificar(e)
@@ -297,9 +301,9 @@ def diario(rutas_base: Rutas, hoy: str | None = None, hasta: str | None = None, 
     return n
 
 
-def _informe(n: Noche, rutas_base: Rutas, en_datamart: bool = True) -> Path:
+def _informe(n: Noche, rutas_base: Rutas, en_datamart: bool = True, sufijo: str = "") -> Path:
     texto = NOT.markdown(n.resumen())
-    destino = rutas_base.logs.parent / f"estado_diario_{n.hoy}{'' if en_datamart else '_dry-run'}.md"
+    destino = rutas_base.logs.parent / f"estado_diario_{n.hoy}{sufijo}{'' if en_datamart else '_dry-run'}.md"
     destino.parent.mkdir(parents=True, exist_ok=True)
     destino.write_text(texto, encoding="utf-8")
     if en_datamart:
@@ -307,6 +311,83 @@ def _informe(n: Noche, rutas_base: Rutas, en_datamart: bool = True) -> Path:
         copia.parent.mkdir(parents=True, exist_ok=True)
         copia.write_text(texto, encoding="utf-8")
     return destino
+
+
+# ── pasada BBG (estación con terminal): cierra los PENDIENTE_TERMINAL de la ventana ───────────────────────────────────
+def fechas_con_pendientes(raiz: Path, hoy: str, ventana: int) -> list[str]:
+    b = backlog(raiz, hoy, ventana)
+    if b.empty:
+        return []
+    return sorted(set(b.loc[b["bloqueos"].astype(str).str.contains("PENDIENTE_TERMINAL"), "fecha"]))
+
+
+def pasada_bbg(rutas_base: Rutas, hoy: str | None = None, fechas: list[str] | None = None, todas: bool = False, opciones=None,
+               bbg_factory=None, teams_url: str | None = None, log=None) -> Noche:
+    """Operador en la estación con terminal: `recalcular --con-terminal` de cada fecha indicada (o de todas las de la ventana con
+    PENDIENTE_TERMINAL), sin tocar los maestros; `CacheBloomberg` pide exactamente lo que falta y persiste los "sin dato", y la
+    publicación por fondo destraba los fondos que ya no tienen pendientes. Mismo candado que la nocturna. Códigos: 0 sin
+    pendientes en la ventana · 1 quedan · 2 terminal/xbbg no disponible o fallo · 3 candado ajeno."""
+    from .adaptadores.bbg import CacheBloomberg, XbbgBloomberg, xbbg_disponible
+    from .pipeline import Opciones
+    hoy = _txt(hoy or dt.date.today())
+    raiz = rutas_base.datamart
+    if rutas_base.modo != "diario":
+        raise ValueError(f"`pasada-bbg` requiere REPORTERIA_MODO=diario (modo actual: {rutas_base.modo})")
+    opciones = opciones or Opciones()
+    log = log or configurar_log(rutas_base.logs.parent / "diario", "reporteria.pasada_bbg", prefijo="pasada_bbg")
+    log.propagate = False
+    n = Noche(hoy=hoy)
+    if bbg_factory is None:
+        estado, detalle = xbbg_disponible()
+        if estado != "ok":
+            n.errores.append(f"xbbg {estado}: {detalle or 'instale xbbg en el Python de la terminal (py -3.12)'}")
+            n.codigo, n.infra = 2, True
+            log.error("%s", n.errores[-1])
+            return n
+        bbg_factory = lambda rf: CacheBloomberg(XbbgBloomberg(), rf.cache, rf.fecha)   # noqa: E731
+    parametros, _, _ = _reglas(rutas_base)
+    ventana = IMP.ventana_de(rutas_base, parametros) or IMP.VENTANA_DEFAULT
+    objetivo = sorted(fechas) if fechas else (fechas_con_pendientes(raiz, hoy, ventana) if todas else [])
+    log.info("pasada BBG hoy=%s fechas=%s", hoy, objetivo)
+    try:
+        lock = DM.Lock(raiz, horas=float(parametros.get("lock_horas", LOCK_HORAS)), nombre="pasada-bbg").__enter__()
+    except RuntimeError as e:
+        log.error("%s", e)
+        n.errores.append(str(e))
+        n.codigo = 3
+        return n
+    try:
+        for f in objetivo:
+            if DMV.ultima_verdad(raiz, f) is None:
+                n.errores.append(f"{f}: sin corrida que re-expresar")
+                continue
+            rf = IMP.rutas_de(rutas_base, f)
+            bbg = bbg_factory(rf)
+            try:
+                w = IMP.recalcular(rf, f"pasada BBG {hoy}", con_terminal=True, bbg=bbg, fx=opciones.fx, facts=opciones.facts,
+                                   sin_cargar_maestros=True, log=log)
+            except Exception as e:                  # noqa: BLE001 — una fecha no frena a las demás
+                log.exception("pasada BBG de %s falló", f)
+                n.errores.append(f"{f}: {type(e).__name__}: {e}")
+                n.infra = True
+                continue
+            caida = bool(getattr(getattr(bbg, "inner", bbg), "caida", False))
+            if caida:
+                n.errores.append(f"{f}: terminal sin sesión ({getattr(bbg, 'inner', bbg).errores[0]}): nada se persistió")
+                n.infra = True
+            n.reevaluadas.append(dict(fecha=f, disparadores=["PASADA_BBG"], corrida=w.numero, fondos=_conteo(raiz, f),
+                                      pedidos=len(getattr(bbg, "sin_cache", [])), pendientes=int(w.corrida.get("n_pendientes", 0))))
+            log.info("%s → %s (%s; pendientes %d; pedidos sin respuesta %d) %s", f, w.etiqueta, w.completitud, w.corrida.get("n_pendientes", 0),
+                     len(getattr(bbg, "sin_cache", [])), n.reevaluadas[-1]["fondos"])
+    finally:
+        lock.__exit__(None, None, None)
+    n.backlog = backlog(raiz, hoy, ventana)
+    quedan = fechas_con_pendientes(raiz, hoy, ventana)
+    n.codigo = 2 if n.infra else (1 if quedan else 0)
+    n.informe = _informe(n, rutas_base, sufijo="_bbg")
+    n.teams = NOT.teams(n.resumen(), teams_url, rutas_base.logs.parent, log=log) if n.reevaluadas or n.errores else {"enviado": False, "motivo": "nada que informar"}
+    log.info("fin pasada BBG: código %d; fechas con pendientes en la ventana: %s", n.codigo, quedan or "ninguna")
+    return n
 
 
 # ── cierre mensual: la última corrida del último día calendario, al layout de git ─────────────────────────────────────

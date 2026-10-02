@@ -99,7 +99,7 @@ def test_rutas_cache_modo_y_bloquea_publicacion(monkeypatch, tmp_path, fixtures)
     monkeypatch.delenv("REPORTERIA_MODO")
     monkeypatch.delenv("REPORTERIA_CACHE")
     r = Rutas.desde_env("20260731")
-    assert r.modo == "mensual" and r.cache.parent.name == "04_CACHE"
+    assert r.modo == "diario" and r.cache.parent.name == "04_CACHE"                   # H10e: diario por defecto
     rg = leer_reglas(fixtures / "REGLAS.xlsx")
     assert "Bloquea_Publicacion" in rg.alertas.columns and not rg.alertas["Bloquea_Publicacion"].astype(bool).any()     # default NO (como Activa, queda bool)
 

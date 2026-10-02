@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import os
 import typer
 
 from .config import Rutas
@@ -86,6 +87,9 @@ def _estado_datamart(r: Rutas) -> list[str]:
            f"cierre {r.fecha}: {est}; borradores sin publicar: {len(bor)}"]
     if (Path(r.datamart) / ".lock").exists():
         out.append(f"[AVISO] datamart con candado: {(Path(r.datamart) / '.lock').read_text(encoding='utf-8')}")
+    if r.modo == "diario" and not os.environ.get("REPORTERIA_DATAMART"):
+        out.append("[AVISO] modo diario (default desde H10e) con el datamart del paquete: para la operación mensual en git ponga REPORTERIA_MODO=mensual "
+                   "en .env; para la diaria, REPORTERIA_DATAMART=<share>\\datamart y REPORTERIA_CACHE=<share>\\04_CACHE")
     if r.modo == "diario" and vs:
         from .publicacion import estado_fondos
         t = estado_fondos(r.datamart, r.fecha)
@@ -443,14 +447,30 @@ def estado(fecha: str = typer.Option(..., help="Fecha YYYYMMDD"), fondo: int | N
 
 
 @app.command()
-def reporte(fecha: str = typer.Option(..., help="Cierre YYYYMMDD"),
+def reporte(fecha: str | None = typer.Option(None, help="Cierre YYYYMMDD"),
+            mes: str | None = typer.Option(None, help="Modo diario: YYYYMM → REPORTE_MES_YYYYMM.xlsx con lo publicado de cada fondo-día"),
             publicada: bool = typer.Option(False, "--publicada", help="Lo reportado (primera versión publicada)"),
             version: int | None = typer.Option(None, help="Una versión concreta"),
             conocimiento: str | None = typer.Option(None, help="Lo que se sabía al YYYYMMDD (última versión con fecha ≤ ese día)"),
             salida: Path | None = typer.Option(None, help="Excel de salida (default: 02_OUTPUTS/F/REPORTE_F_vNNN.xlsx)"),
             raiz: Path | None = None):
-    """Regenera el Excel del cierre desde el datamart: última verdad por defecto, o --publicada / --version N / --conocimiento D."""
+    """Regenera el Excel del cierre desde el datamart: última verdad por defecto, o --publicada / --version N / --conocimiento D.
+    Con --mes YYYYMM (modo diario): resumen, estado por fondo-día, agregados y cartera de todo lo publicado en el mes."""
     from .salida import escribir_excel
+    if mes:
+        from . import datamart as DMV
+        r = Rutas.desde_env(f"{mes}01", raiz)
+        hojas = DMV.reporte_mensual(r.datamart, mes)
+        if hojas["resumen"].empty:
+            typer.echo(f"sin fondo-días publicados en {mes} ({r.datamart})")
+            raise typer.Exit(1)
+        destino = Path(salida) if salida else r.outputs.parent / f"REPORTE_MES_{mes}.xlsx"
+        escribir_excel(hojas, destino)
+        typer.echo(f"{mes}: {len(hojas['resumen'])} fechas, {len(hojas['cartera'])} posiciones publicadas → {destino}")
+        raise typer.Exit(0)
+    if not fecha:
+        typer.echo("ERROR: indique --fecha F o --mes YYYYMM")
+        raise typer.Exit(2)
     r = Rutas.desde_env(fecha, raiz)
     v = _version_o_salir(r, fecha, publicada, version, conocimiento)
     hojas = v.hojas()
@@ -805,6 +825,33 @@ def diario(hoy: str | None = typer.Option(None, help="Fecha de la nocturna YYYYM
     for e in n.errores:
         typer.echo(f"  [ERR] {e}")
     typer.echo(f"backlog en ventana: {len(n.backlog)} fondo-día | informe {n.informe} | Teams: {'enviado' if n.teams.get('enviado') else n.teams.get('motivo', '')}")
+    raise typer.Exit(n.codigo)
+
+
+@app.command("pasada-bbg")
+def pasada_bbg_cmd(fecha: list[str] = typer.Option([], "--fecha", help="Fecha(s) a re-expresar con terminal (repetible)"),
+                   todas: bool = typer.Option(False, "--todas", help="Todas las fechas de la ventana con PENDIENTE_TERMINAL"),
+                   hoy: str | None = typer.Option(None, help="Fecha de referencia YYYYMMDD (default: hoy)"), raiz: Path | None = None):
+    """Estación con terminal Bloomberg: cierra los PENDIENTE_TERMINAL (recalcular --con-terminal por fecha, sin tocar maestros), publica
+    los fondos que se destraban e informa por Teams. Exit: 0 sin pendientes en la ventana · 1 quedan · 2 xbbg/terminal no disponible · 3 candado."""
+    import datetime as dt
+    import os
+    from .orquestacion import pasada_bbg
+    if not fecha and not todas:
+        typer.echo("ERROR: indique --fecha F (repetible) o --todas")
+        raise typer.Exit(2)
+    h = hoy or dt.date.today().strftime("%Y%m%d")
+    r = _rutas_diario(h, raiz)
+    try:
+        n = pasada_bbg(r, hoy=h, fechas=list(fecha) or None, todas=todas, teams_url=os.environ.get("TEAMS_WEBHOOK_URL"))
+    except Exception as e:                      # noqa: BLE001
+        typer.echo(f"ERROR: {e}")
+        raise typer.Exit(2)
+    for e in n.reevaluadas:
+        typer.echo(f"  {e['fecha']}  corrida {e['corrida']:03d}  pendientes {e['pendientes']}  sin respuesta {e['pedidos']}  {e.get('fondos') or ''}")
+    for e in n.errores:
+        typer.echo(f"  [ERR] {e}")
+    typer.echo(f"backlog en ventana: {len(n.backlog)} fondo-día | informe {n.informe or '-'} | Teams: {'enviado' if n.teams.get('enviado') else n.teams.get('motivo', '')}")
     raise typer.Exit(n.codigo)
 
 

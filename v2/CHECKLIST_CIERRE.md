@@ -30,8 +30,8 @@ Todo se corre desde una consola (PowerShell) en la carpeta del paquete. `F` es e
 8c. Al final de `correr` sale el impacto sobre los cierres ya publicados y, si lo hay, se re-expresan solos (`impacto … ×N`, `re-expresado F vNNN`). Si una re-expresión queda `PARCIAL`, `reporteria pendientes` dice qué falta y `reporteria recalcular --fecha F --con-terminal` lo cierra con la terminal abierta. Todo eso va en el `git add datamart` del cierre.
 9. Publicar: `reporteria publicar --fecha F` (toma el último borrador de `02_OUTPUTS\F\borradores`; con `--borrador TS` otro) → `git add datamart`, commit, push. Esa versión es lo reportado y queda congelada; el cierre siguiente la usa como cierre anterior (hedge heredado y alertas A05–A07). Si después hay que corregir el cierre: volver a correr y `publicar --reexpresar --motivo "qué cambió"` (nueva versión; `reporte --fecha F --publicada` sigue dando la original). `reporteria versiones` muestra lo que hay.
 
-## Operación diaria (modo diario, H10d; el switch por defecto llega con H10e)
-Servidor nocturno sin Bloomberg, `.env` con `REPORTERIA_MODO=diario`, `REPORTERIA_DATAMART=<share>\datamart`, `REPORTERIA_CACHE=<share>\04_CACHE`
+## Operación diaria (modo diario; es el default desde H10e: para seguir con el cierre mensual en git poner `REPORTERIA_MODO=mensual`)
+Servidor nocturno sin Bloomberg, `.env` con `REPORTERIA_DATAMART=<share>\datamart`, `REPORTERIA_CACHE=<share>\04_CACHE` (y `REPORTERIA_MODO` vacío o `diario`)
 y, si se quiere el aviso, `TEAMS_WEBHOOK_URL` (webhook entrante del canal). Una sola vez: `reporteria migrar-datamart --destino <share>\datamart`
 y en `REGLAS/parametros` la fila `nocturna_desde = YYYYMMDD` (primer cierre que debe procesar la nocturna; sin ella arranca en la primera
 fecha con corrida y, si no hay ninguna, en hoy−1).
@@ -43,7 +43,15 @@ fecha con corrida y, si no hay ninguna, en hoy−1).
    archivo roto o a medio copiar (se reintenta solo cada noche al corregirlo), la tabla de backlog y lo **marcado** (código o REGLAS
    globales: `reporteria recalcular --desde F --motivo "..."` a mano). `reporteria estado --fecha F` da el detalle por fondo.
 3. Insumo que llega tarde (JPM, RA, curvas, FACTURAS): dejarlo en `01_INPUTS\MERCADO` con su fecha; la noche siguiente la fecha se
-   re-evalúa sola y los fondos pasan a PUBLICADA. Pendientes de terminal: pasada BBG en la estación (H10e).
+   re-evalúa sola y los fondos pasan a PUBLICADA.
+3b. Pendientes de terminal (`PENDIENTE_TERMINAL` en Teams / `estado`): en la estación con terminal Bloomberg abierta, con el mismo `.env`
+   (datamart y caché del share), `py -3.12 -m reporteria.cli pasada-bbg --todas`. Pide a la terminal solo lo que falta, publica los fondos
+   que se destraban y avisa por Teams; exit 0 = sin pendientes en la ventana, 1 = quedan (sin dato en Bloomberg: revisar `pendientes`),
+   2 = xbbg/terminal no disponible, 3 = la nocturna está corriendo. Una fecha puntual: `pasada-bbg --fecha F`.
+3c. Fondo en cuarentena (`ERROR_FONDO` en Teams / `estado`): un error de código o de datos solo en ese fondo; los demás se publicaron.
+   Mirar el log de `03_LOGS\F\`, corregir (REGLAS, insumo, o avisar al desarrollador) y la noche siguiente lo re-evalúa. `INSUMO_INVALIDO`
+   (archivo roto o a medio copiar): reemplazar el archivo; esa fuente se apagó ese día pero los fondos se publicaron.
+3d. Reporte del mes a pedido: `reporteria reporte --mes 202608` → `02_OUTPUTS\REPORTE_MES_202608.xlsx` (solo lo publicado).
 4. Antes de la primera nocturna o tras un cambio grande: `reporteria diario --dry-run` muestra el plan sin tocar nada (y deja el JSON de
    Teams en `03_LOGS`). `reporteria diario --hoy 20260803` simula la nocturna de otro día (procesa hasta el 2).
 5. Fin de mes: cuando el último día calendario esté 100 % publicado, `reporteria cierre-mensual --fecha F` (exit 1 si hay fondos sin

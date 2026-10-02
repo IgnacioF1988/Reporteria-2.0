@@ -1,4 +1,4 @@
-# Prompt de continuación — Reportería 2.0 (H10d en adelante)
+# Prompt de continuación — Reportería 2.0 (H10 completo; siguiente iteración)
 
 Copia todo lo que sigue como primer mensaje de la nueva sesión.
 
@@ -34,7 +34,9 @@ Lee primero, en este orden: `v2/PLAN.md` (plan completo con decisiones cerradas;
 - Documentar cada hito en `README.md` (sección Modo diario) y marcar HECHO en `PLAN.md` §5i; actualizar `CHECKLIST_CIERRE.md` cuando cambie la operación.
 - Al terminar un hito: tabla corta de qué quedó, comandos exactos para que yo verifique en mi máquina, y pedir aprobación para el siguiente hito. Hitos de a uno.
 
-## Tarea inmediata: H10d — Orquestación nocturna (plan §5i, adaptado al calendario aclarado)
+## Estado: H10d y H10e HECHOS (2026-10-02). Lo que sigue se decide con el usuario (ver FUTURO.md y la próxima iteración: fuente de derivados para el hedge, vista BI definitiva, Facts incremental, servidor nocturno real).
+
+## (Histórico) H10d — Orquestación nocturna
 Entregables (todo en `v2/`, módulo nuevo `reporteria/orquestacion.py` + `reporteria/notificacion.py` + CLI):
 1. `reporteria diario [--hoy D] [--hasta D] [--dry-run]`: con `Lock` del datamart (exit 3 si ajeno y vigente) → `limpiar_tmp` → cargar maestros una vez (único escritor) → `calendario.pendientes(DM.fechas, hoy, existe_cubo_en(RUTA_CUBO_DIR), feriados de REGLAS)` → por cada fecha LISTA en orden: `correr(sin_bbg=True, excel=False)` → `publicar(modo="diario")` (readiness ya viene en la hoja `publicacion`) → re-evaluar los PROVISORIO/SIN_CORRIDA de la ventana cuyo bloqueo pudo cambiar (insumo llegado, caché con dato nuevo, cobertura) con `recalcular` → `impacto(ventana)` y `reexpresar_impactados` → `estado_diario_{hoy}.md` en `03_LOGS` (y en el share junto al datamart) → Teams. Fechas SIN_CUBO: alerta y `SIN_CORRIDA(SIN_CUBO)` para los esperados en `estado.json` de esa fecha; AUN_NO_ESPERADA: silencio. CUBO o REGLAS inválidos: la corrida de esa fecha no existe, todos los esperados `SIN_CORRIDA` y notificación; la nocturna sigue con las demás fechas. Códigos: 0 todo publicado · 1 hubo provisorios/sin corrida · 2 fallo de infraestructura · 3 lock ajeno.
 2. `notificacion.teams(resumen, url)` con `urllib.request` (sin dependencias); `--dry-run` escribe el JSON en `03_LOGS/teams_{ts}.json`; sin `TEAMS_WEBHOOK_URL` → aviso en log y sigue. Mensaje: "F: 47/49 publicados; 2 provisorios (fondo: causa); re-expresados N fondo-días; marcados M (recalcular --desde)".
