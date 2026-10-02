@@ -7,5 +7,14 @@
     "borrador": "borrador_20261001_175703",
     "code_hash": "f3447ab83ced16bc",
     "completitud": "COMPLETA"
+  },
+  {
+    "version": 2,
+    "estado": "REEXPRESADA",
+    "motivo": "H9c: cache con sin-dato y maestros bitemporales",
+    "ts": "2026-10-02 11:06:37",
+    "borrador": "borrador_20261002_110608",
+    "code_hash": "5c7d3f4b27456be0",
+    "completitud": "COMPLETA"
   }
 ]

@@ -1,0 +1,82 @@
+{
+  "REGLAS": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\01_INPUTS\\MANUALES\\REGLAS.xlsx",
+    "hash": "a65a35a862d74e5c",
+    "copia": "REGLAS.xlsx"
+  },
+  "RA_TIR": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\datamart\\cierres\\cierre=20260731\\version=001\\insumos\\RA_TIR.xlsx",
+    "hash": "a1162d15aff70f20",
+    "copia": "RA_TIR.xlsx"
+  },
+  "paridades": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\datamart\\cierres\\cierre=20260731\\version=001\\insumos\\4- Carga de paridades.xlsx",
+    "hash": "791544c86e6b58bf",
+    "copia": "4- Carga de paridades.xlsx"
+  },
+  "bond_schedule": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\datamart\\cierres\\cierre=20260731\\version=001\\insumos\\bond_schedule.jsonl",
+    "hash": "de668e2e42b1e6f8",
+    "copia": "bond_schedule.jsonl"
+  },
+  "EXCEPCIONES_0": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\01_INPUTS\\MANUALES\\EXCEPCIONES_MLDL.xlsx",
+    "hash": "0a15501986e2ab52",
+    "copia": "EXCEPCIONES_MLDL.xlsx"
+  },
+  "EXCEPCIONES_1": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\01_INPUTS\\MANUALES\\EXCEPCIONES_MRCLP.xlsx",
+    "hash": "eb9e3d96d8e44744",
+    "copia": "EXCEPCIONES_MRCLP.xlsx"
+  },
+  "EXCEPCIONES_2": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\01_INPUTS\\MANUALES\\EXCEPCIONES_USD.xlsx",
+    "hash": "5033e3274bfee089",
+    "copia": "EXCEPCIONES_USD.xlsx"
+  },
+  "CUBO": {
+    "ruta": "\\\\moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristóbal Campos\\ETL_TABLAS_MODELO_FONDOS\\Archivos\\CUBO_20260731.xlsx",
+    "hash": "1d59852db61b8425"
+  },
+  "BD_INSTRUMENTOS": {
+    "ruta": "\\\\moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\REPORTES MENSUALES\\INPUTS\\3.- BIX\\BD_INSTRUMENTOS.xlsx",
+    "hash": "a736114a6f5c7ab7"
+  },
+  "HOMOL_INSTRUMENTOS": {
+    "ruta": "\\\\moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\REPORTES MENSUALES\\INPUTS\\3.- BIX\\HOMOL_INSTRUMENTOS.xlsx",
+    "hash": "9330ba039e23852b"
+  },
+  "HOMOL_FUNDS": {
+    "ruta": "\\\\moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\REPORTES MENSUALES\\INPUTS\\3.- BIX\\DIMENSIONALES\\HOMOL_FUNDS.xlsx",
+    "hash": "d07c6be5afc218ae"
+  },
+  "JPM": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\01_INPUTS\\MERCADO\\JPM_CEMBI_GBI_20260731.xlsx",
+    "hash": "86e916221843fed1"
+  },
+  "Carga_Indexes": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\01_INPUTS\\MERCADO\\Carga_Indexes_20260731_20260810.csv",
+    "hash": "dcb08da86e407f1e"
+  },
+  "CurvasSoberanas": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\01_INPUTS\\MERCADO\\Carga_CurvasSoberanas_20260731_20260810.csv",
+    "hash": "7e6a7a2b2670e2ff"
+  },
+  "DIMENSIONALES": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\dim\\dimensionales.duckdb",
+    "hash": "f0ea441efb48c4d2"
+  },
+  "DEFAULTED": {
+    "ruta": "\\\\moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\REPORTES MENSUALES\\INPUTS\\3.- BIX\\DIMENSIONALES\\DEFAULTED.xlsx",
+    "hash": "62ece001521a0a89"
+  },
+  "CACHE": {
+    "ruta": "\\\\Moneda03\\Compartidos\\Inteligencia de Negocios y Mercados\\Desarrollo\\Cristopher Olmedo\\Reporteria 2.0\\v2\\04_CACHE\\20260731",
+    "hash": "29ad6bbe16161b64",
+    "archivos": 252
+  },
+  "facturas_al_cierre": {
+    "filas": 53517,
+    "copia": "facturas_al_cierre.parquet"
+  }
+}

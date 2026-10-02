@@ -1,0 +1,69 @@
+{
+  "fecha": "20260731",
+  "ts": "2026-10-02 11:06:08",
+  "estado": "REEXPRESADA",
+  "motivo": "H9c: cache con sin-dato y maestros bitemporales",
+  "version": 2,
+  "completitud": "COMPLETA",
+  "n_pendientes": 0,
+  "opciones": {
+    "sin_bbg": true,
+    "sin_sql": true,
+    "sin_facts": true
+  },
+  "anterior_version": null,
+  "fecha_ant": null,
+  "maestros": {
+    "base": "20261002_101040",
+    "carga": null,
+    "cambios": {},
+    "conocimiento": null,
+    "declaraciones": 0
+  },
+  "hashes": {
+    "codigo": "5c7d3f4b27456be0",
+    "cubo": "1d59852db61b8425",
+    "reglas": "a65a35a862d74e5c",
+    "dim": "f0ea441efb48c4d2",
+    "dim_importado": "2026-10-01 16:18"
+  },
+  "resumen": {
+    "posiciones": 7197,
+    "estado": {
+      "RESUELTO": 7025,
+      "FALTANTE": 172
+    },
+    "fuente": {
+      "FACTURA": 3528,
+      "CERO": 1636,
+      "JPM": 600,
+      "BBG": 407,
+      "RA": 262,
+      "CAJA": 244,
+      "REGLA_DEF": 205,
+      "EXCEPCIONES": 92,
+      "CSHF": 45,
+      "JSONL": 6
+    },
+    "segundos": 158.8
+  },
+  "hojas": [
+    "resumen",
+    "agregados",
+    "alertas_resumen",
+    "alertas",
+    "faltantes",
+    "plantilla_overrides",
+    "plantilla_cajas",
+    "plantilla_dim",
+    "pendientes",
+    "cartera_final",
+    "candidatos",
+    "conversiones",
+    "curvas_drop",
+    "td_detalle",
+    "reglas_aplicadas",
+    "insumos"
+  ],
+  "publicado_en": "2026-10-02 11:06:37"
+}
