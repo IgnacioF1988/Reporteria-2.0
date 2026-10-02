@@ -463,6 +463,20 @@ Escrituras atómicas: `corrida=NNN.tmp/` → `corrida.json` al final → rename;
 ### Diferido / supuestos
 Hedge por fuente de derivados y vista BI definitiva (próxima iteración). Servidor nocturno por definir: mientras, la nocturna puede correr en una estación del equipo sin terminal con `diario` en Task Scheduler. Facts incremental (FUTURO 16). Supuestos: `Activo_MantenedorFondos=1` define los esperados; `cobertura_min_mv` sigue siendo 0,95 salvo que REGLAS diga otra cosa; los umbrales diarios se calibran con el primer mes de corridas.
 
+## 5j. Ajuste tras la verificación H9b/H9c — xbbg instalado pero que no carga
+
+### Contexto
+En la estación sin terminal, `correr --fecha 20260731` (sin `--sin-bbg`) murió con `ImportError: DLL load failed … xbbg._core` (Python 3.14; xbbg ≥ 1.0 trae un núcleo Rust que exige blpapi). El import ocurre en `pipeline._bloomberg` (`pipeline.py:233`) **fuera** de todo try: la corrida no llega a escribir borrador. `cli._bbg_para` (`cli.py:123-127`) sí captura la excepción, pero cae a `FixtureBloomberg` en silencio: una re-expresión `--con-terminal` en una máquina rota persistiría "sin dato" como si la terminal hubiera respondido. En la terminal real (`py -3.12`) xbbg 1.x funciona: los `BAD_SEC` y `field exceptions` del log son tickers sin dato (ETF IE/LU, PK2 sin ISIN válido) y ya se tratan como `avisos` → `BBG_PEDIDO_RECHAZADO` INFO + fila NaN en caché.
+
+### Cambio (mínimo, reutiliza lo que ya existe)
+1. **`adaptadores/bbg.py`**: `XbbgBloomberg.__init__` captura `Exception` del `import xbbg` y la registra en `self.errores` (`"ImportError: …"`), dejando `blp=None` y `caida=True`; `_llamar` ya devuelve `None` cuando `caida`. Así `CacheBloomberg(XbbgBloomberg())` sigue construyéndose, **no persiste misses** (`CacheBloomberg._completar` ya salta la escritura si `self.caida`) y `pipeline` emite la alerta existente `BBG_SIN_CONEXION` CRITICA (`pipeline.py:367-370`) con el texto del ImportError. Helper `xbbg_disponible() -> tuple[bool, str]` (import en subproceso no hace falta: un `try: import xbbg` basta) para `check`.
+2. **`cli._bbg_para`**: quitar el `try/except` silencioso; siempre `CacheBloomberg(XbbgBloomberg(), …)` cuando `con_terminal` (la degradación vive en el adaptador, con alerta). `cli.check`: la línea de `xbbg` distingue "no instalado" de "instalado pero no carga: <error>" y sugiere `py -3.12` / `--sin-bbg`.
+3. **`pipeline._bloomberg`**: sin cambio de forma (el import diferido ya está dentro de `XbbgBloomberg`); el log escribe `BBG: terminal no disponible (<error>): solo caché, pendientes a terminal`.
+4. **Tests** (`test_adaptador_bbg.py`, `test_cli.py`): `XbbgBloomberg(blp=None)` con `import xbbg` parcheado para lanzar `ImportError` → `caida=True`, `errores[0]` empieza por `ImportError`; `CacheBloomberg` sobre él no escribe filas NaN y deja `sin_cache` para `marcar_pendientes_terminal`; `correr` sin `sin_bbg` con ese adaptador inyectado termina con borrador, alerta `BBG_SIN_CONEXION` y las posiciones sin caché en `PENDIENTE_TERMINAL`; `check` imprime la línea "instalado pero no carga".
+
+### Verificación
+`pytest -q` verde · en la estación 3.14: `python -m reporteria.cli correr --fecha 20260731` termina (exit 1 por CRITICA), `alertas_resumen` trae `BBG_SIN_CONEXION` con el ImportError y `pendientes` lista lo que falta; `check` muestra `[AVISO] xbbg instalado pero no carga …` · en la terminal `py -3.12` nada cambia (`comparar` v002 vs v003 → 0 diferencias).
+
 ## 6. Diferido a `FUTURO.md`
 RA TIR → yield equivalente por periodicidad · flotantes propios con forward (hoy suma spot) y validación del supuesto "proveedor entrega nominal local" · fuente `ATRIBUTOS` (TD desde `Atributos_*.xlsx`: Bullet/Sinkable/Zero, Upfront Fee) · drop inverso local→USD · conector a fuente de pactos/simultáneas/DAP · refresco automático de jsonl y HOMOL · fallback tenores México y curvas ARS/UYU · breakeven flujo a flujo · atribución AW/DW vs mes anterior · tratamiento fino de pasivos · exportación a base corporativa · alerta cupón negativo (F4).
 

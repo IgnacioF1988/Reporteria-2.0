@@ -28,3 +28,12 @@ def test_xirr_sin_flujos_o_todo_cero_es_nan():
     assert np.isnan(xirr([-100], [S]))
     assert np.isnan(xirr([-100, 0, 0], [S] + _fechas(2, 6)))
     assert all(np.isnan(v) for v in duracion([], [], S, 0.05))
+
+
+def test_xirr_con_flujo_a_un_siglo_no_lanza():
+    """Un flujo a 100 años hace que (1+r)**t desborde en los extremos del bracket: antes ZeroDivisionError, ahora número o NaN."""
+    from reporteria.finanzas import xirr
+    y = xirr([-100.0, 5.0, 105.0], ["2026-07-31", "2027-07-31", "2126-07-31"])
+    assert y != y or -0.9999 < y < 100
+    y2 = xirr([-100.0, 150.0], ["2026-07-31", "2126-07-31"])
+    assert abs(y2 - (1.5 ** (1 / 100.0) - 1)) < 1e-6

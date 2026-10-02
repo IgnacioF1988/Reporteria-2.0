@@ -207,3 +207,24 @@ def test_terminal_caida_no_persiste_sin_dato_y_marca_sin_cache(tmp_path):
     assert c.sin_cache[0]["ticker"] == "A Corp"
     archivo = list(tmp_path.glob("bdp_YAS_MOD_DUR_*.csv"))
     assert not archivo or pd.read_csv(archivo[0]).empty
+
+
+def test_xbbg_instalado_pero_que_no_carga_degrada_a_terminal_caida(xbbg_roto, tmp_path):
+    from reporteria.adaptadores.bbg import CacheBloomberg, XbbgBloomberg, xbbg_disponible
+    assert xbbg_disponible()[0] == "no_carga" and "DLL load failed" in xbbg_disponible()[1]
+    x = XbbgBloomberg()                                   # no lanza: la degradación vive en el adaptador
+    assert x.caida and x.errores[0].startswith("ImportError") and "_core" in x.errores[0]
+    assert x.bdp(["A Corp"], "YAS_BOND_YLD", settle_dt="20260731").empty
+    c = CacheBloomberg(x, tmp_path, "20260731")
+    assert c.bdp(["A Corp"], "YAS_MOD_DUR", settle_dt="20260731").empty and c.caida
+    assert c.sin_cache[0]["ticker"] == "A Corp"           # queda para PENDIENTE_TERMINAL, no como "sin dato"
+    archivo = list(tmp_path.glob("bdp_YAS_MOD_DUR_*.csv"))
+    assert not archivo or pd.read_csv(archivo[0]).empty
+
+
+def test_xbbg_disponible_distingue_no_instalado(monkeypatch):
+    import sys
+    from reporteria.adaptadores.bbg import xbbg_disponible
+    monkeypatch.delitem(sys.modules, "xbbg", raising=False)
+    monkeypatch.setattr("importlib.util.find_spec", lambda nombre: None)
+    assert xbbg_disponible() == ("no_instalado", "")

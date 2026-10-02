@@ -304,3 +304,10 @@ def test_impacto_recalcular_pendientes_y_correr_sin_recalcular(env_dim, monkeypa
     assert "v002  REEXPRESADA  PARCIAL" in r.output and "equity a FI" in r.output
     r = runner.invoke(app, ["impacto", "--raiz", str(raiz)])
     assert r.exit_code == 0
+
+
+def test_check_distingue_xbbg_instalado_que_no_carga(env_dim, xbbg_roto):
+    r = runner.invoke(app, ["check", "--fecha", "20260731", "--raiz", str(env_dim)])
+    assert r.exit_code == 0, r.output
+    assert "[AVISO] xbbg" in r.output and "instalado pero no carga" in r.output and "DLL load failed" in r.output
+    assert "--sin-bbg" in r.output and "py -3.12" in r.output

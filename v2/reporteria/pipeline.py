@@ -276,6 +276,8 @@ def correr(rutas: Rutas, opciones: Opciones | None = None) -> Resultado:
     log.info("clasificación: %s", pos["Tratamiento"].value_counts().to_dict())
 
     bbg = _bloomberg(opciones, rutas)
+    if getattr(getattr(bbg, "inner", bbg), "caida", False):
+        log.error("BBG: terminal no disponible (%s): solo caché; lo que falte queda PENDIENTE_TERMINAL", getattr(bbg, "inner", bbg).errores[0])
     cands = []
     c, a = candidatos_cajas(pos, reglas.cajas, bbg, rutas.fecha); cands.append(c); al.append(a)
     rpt = _facturas(opciones, rutas, log, al)

@@ -104,12 +104,12 @@ class CacheBloomberg(FixtureBloomberg):
         if faltan:
             nuevos = pedir(faltan)
             cache = pd.concat([cache, nuevos]) if len(nuevos) else cache
-            if self.caida:                                   # terminal sin sesión: no se sabe nada de lo que faltó
+            if self.caida:                                   # terminal sin sesión: no se sabe nada de lo que faltó y no se escribe
                 self._registrar_sin_cache(tipo, campo, faltan, registro, cache.index)
-            else:                                            # preguntado y sin respuesta = "sin dato": se guarda vacío
-                sin_dato = [t for t in faltan if t not in cache.index]
-                if sin_dato:
-                    cache = pd.concat([cache, pd.Series([float("nan")] * len(sin_dato), index=sin_dato)])
+                return cache[cache.index.isin(tickers)]
+            sin_dato = [t for t in faltan if t not in cache.index]   # preguntado y sin respuesta = "sin dato": se guarda vacío
+            if sin_dato:
+                cache = pd.concat([cache, pd.Series([float("nan")] * len(sin_dato), index=sin_dato)])
             self.dir.mkdir(parents=True, exist_ok=True)
             pd.DataFrame({"ticker": cache.index, "valor": cache.values}).to_csv(
                 _archivo(self.dir, campo, self.fecha, overrides, tipo), index=False)
@@ -138,6 +138,20 @@ class CacheBloomberg(FixtureBloomberg):
         return d if d is not None else pd.DataFrame()
 
 
+def xbbg_disponible() -> tuple[str, str]:
+    """('ok', versión) | ('no_instalado', '') | ('no_carga', error). Para `check`: distingue faltar de estar roto."""
+    import importlib.util
+    try:
+        import xbbg
+        return "ok", str(getattr(xbbg, "__version__", ""))
+    except Exception as e:                    # noqa: BLE001
+        try:
+            instalado = importlib.util.find_spec("xbbg") is not None
+        except (ValueError, ImportError):
+            instalado = True
+        return ("no_carga", f"{type(e).__name__}: {str(e)[:200]}") if instalado else ("no_instalado", "")
+
+
 def _es_fallo_de_sesion(msg: str) -> bool:
     m = msg.lower()
     if "securities failed" in m or "bad_sec" in m or "invalid security" in m:
@@ -149,20 +163,27 @@ def _es_fallo_de_sesion(msg: str) -> bool:
 class XbbgBloomberg:
     """Terminal real vía xbbg. Import diferido: solo existe en Windows con terminal.
 
+    Si xbbg no está o no carga (p. ej. xbbg ≥ 1.0 sin blpapi: `DLL load failed … _core`), el adaptador nace `caida` con el
+    error en `errores`: `CacheBloomberg` no persiste "sin dato", lo que falte queda PENDIENTE_TERMINAL y el pipeline emite
+    BBG_SIN_CONEXION. Nunca se lanza desde acá: la corrida sigue solo con caché.
+
     Soporta xbbg 0.7 (respuestas anchas: index=ticker, columnas=campos; overrides como kwargs) y xbbg ≥ 1.0 (respuestas
     largas ticker/field/value; overrides en MAYÚSCULAS vía `overrides=`). Los overrides del pipeline llegan en cualquier
     capitalización (settle_dt, SETTLE_DT, YAS_XCCY_FOREIGN_CURRENCY) y acá se normalizan a como los espera Bloomberg.
     """
 
     def __init__(self, lote: int = 100, blp=None, version: str | None = None):
-        if blp is None:
-            import xbbg
-            from xbbg import blp
-            version = version or getattr(xbbg, "__version__", "0")
-        self.blp, self.lote = blp, lote
-        self.nueva_api = int(str(version or "0").split(".")[0].split("+")[0] or 0) >= 1
         self.errores: list[str] = []          # fallos de sesión/conexión: tras el primero no se vuelve a intentar
         self.avisos: list[str] = []           # pedidos rechazados (p. ej. todos los tickers inválidos): se sigue sin dato
+        if blp is None:
+            try:
+                import xbbg
+                from xbbg import blp
+                version = version or getattr(xbbg, "__version__", "0")
+            except Exception as e:            # noqa: BLE001 — xbbg ausente o que no carga (DLL/blpapi): terminal caída
+                self.errores.append(f"{type(e).__name__}: {str(e)[:200]}")
+        self.blp, self.lote = blp, lote
+        self.nueva_api = int(str(version or "0").split(".")[0].split("+")[0] or 0) >= 1
 
     @staticmethod
     def _ov(overrides: dict) -> dict:
@@ -177,10 +198,11 @@ class XbbgBloomberg:
     def caida(self) -> bool:
         return bool(self.errores)
 
-    def _llamar(self, fn, *args, **kw):
-        """Llama a xbbg; si la terminal no responde (sesión/conexión) registra el error y devuelve None sin reintentar."""
+    def _llamar(self, metodo: str, *args, **kw):
+        """Llama a `blp.<metodo>`; si la terminal no responde (sesión/conexión) registra el error y devuelve None sin reintentar."""
         if self.caida:
             return None
+        fn = getattr(self.blp, metodo)
         ov = self._ov(kw.pop("overrides", {}) or {})
         try:
             if self.nueva_api:                   # ≥1.0: pandas explícito (el backend por defecto puede ser narwhals/arrow)
@@ -254,13 +276,13 @@ class XbbgBloomberg:
     def bdp(self, tickers, campo, **overrides):
         out = {}
         for i in range(0, len(tickers), self.lote):
-            res = self._llamar(self.blp.bdp, tickers=list(tickers[i:i + self.lote]), flds=campo, overrides=overrides)
+            res = self._llamar("bdp", tickers=list(tickers[i:i + self.lote]), flds=campo, overrides=overrides)
             out.update(self._puntual(res, campo))
         return self._serie(out)
 
     def bds(self, ticker, campo, **overrides):
         try:
-            d = self._llamar(self.blp.bds, ticker, campo, overrides=overrides)
+            d = self._llamar("bds", ticker, campo, overrides=overrides)
         except Exception:                        # ticker inválido u override rechazado: sin TD para ese papel
             return pd.DataFrame()
         if d is None or len(d) == 0:
@@ -272,7 +294,7 @@ class XbbgBloomberg:
         out = {}
         if self.nueva_api:
             try:
-                res = self._llamar(self.blp.bdh, tickers=list(tickers), flds=campo, start_date=fecha, end_date=fecha)
+                res = self._llamar("bdh", tickers=list(tickers), flds=campo, start_date=fecha, end_date=fecha)
                 out.update(self._puntual(res, campo))
             except Exception:
                 pass

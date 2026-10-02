@@ -120,11 +120,8 @@ def _bbg_para(r: Rutas, con_terminal: bool):
     from .adaptadores.bbg import CacheBloomberg, FixtureBloomberg
     if not con_terminal:
         return FixtureBloomberg(r.cache, r.fecha)
-    try:
-        from .adaptadores.bbg import XbbgBloomberg
-        return CacheBloomberg(XbbgBloomberg(), r.cache, r.fecha)
-    except Exception:                           # noqa: BLE001 — sin xbbg: solo caché
-        return FixtureBloomberg(r.cache, r.fecha)
+    from .adaptadores.bbg import XbbgBloomberg
+    return CacheBloomberg(XbbgBloomberg(), r.cache, r.fecha)    # si xbbg no carga nace `caida`: alerta BBG_SIN_CONEXION, no silencio
 
 
 def _estado_maestros(r: Rutas) -> list[str]:
@@ -207,7 +204,14 @@ def _estado_entorno(r: Rutas) -> list[str]:
     presentes = [v for v in vars_ if os.environ.get(v)]
     out.append(f"[{'OK ' if env.exists() or len(presentes) == len(vars_) else 'opc. '}] .env {'encontrado' if env.exists() else 'no encontrado en la raíz'}; "
                f"variables definidas: {len(presentes)}/{len(vars_)} {sorted(set(vars_) - set(presentes)) or ''}")
-    for mod, flag in (("xbbg", "--sin-bbg"), ("pyodbc", "--sin-sql"), ("psycopg2", "--sin-facts")):
+    from .adaptadores.bbg import xbbg_disponible
+    estado, detalle = xbbg_disponible()
+    if estado == "no_carga":
+        out.append(f"[AVISO] {'xbbg':16} instalado pero no carga ({detalle}) → correr con --sin-bbg, o en la estación con terminal "
+                   f"usar el Python donde xbbg funciona (p. ej. py -3.12); sin arreglo, lo pendiente de BBG queda PENDIENTE_TERMINAL")
+    else:
+        out.append(f"[{'OK ' if estado == 'ok' else 'opc. '}] {'xbbg':16} {'instalado ' + detalle if estado == 'ok' else 'no instalado → correr con --sin-bbg'}")
+    for mod, flag in (("pyodbc", "--sin-sql"), ("psycopg2", "--sin-facts")):
         ok = importlib.util.find_spec(mod) is not None
         out.append(f"[{'OK ' if ok else 'opc. '}] {mod:16} {'instalado' if ok else f'no instalado → correr con {flag}'}")
     out.extend(_estado_facts(r))

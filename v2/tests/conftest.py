@@ -59,3 +59,18 @@ def bbg(fixtures):
 def fx(fixtures):
     from reporteria.adaptadores.fx_sql import FixtureFx
     return FixtureFx(fixtures, FECHA)
+
+
+@pytest.fixture
+def xbbg_roto(tmp_path, monkeypatch):
+    """Un paquete `xbbg` instalado pero que no carga (como xbbg ≥ 1.0 sin blpapi en Python 3.14: DLL de _core)."""
+    import importlib
+    import sys
+    pkg = tmp_path / "xbbg_roto_site" / "xbbg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text('raise ImportError("DLL load failed while importing _core: No se puede encontrar el módulo")\n',
+                                     encoding="utf-8")
+    monkeypatch.syspath_prepend(str(pkg.parent))
+    monkeypatch.delitem(sys.modules, "xbbg", raising=False)
+    importlib.invalidate_caches()
+    return pkg

@@ -132,6 +132,10 @@ REEXPRESADA con motivo `auto: …`; `--sin-recalcular` lo posterga y `reporteria
 toma de la copia guardada en la versión; `--refrescar-facts` vuelve a bajar Facts). `reporteria impacto [--detalle]` lo muestra sin
 tocar nada (exit 1 si hay impacto).
 
+Si xbbg está instalado pero no carga en esa máquina (p. ej. xbbg ≥ 1.0 sin blpapi en Python 3.14: `DLL load failed … _core`), `correr`
+no se cae: el adaptador nace "caído", sale la alerta CRÍTICA `BBG_SIN_CONEXION` con el error, no se persiste ningún "sin dato" en la
+caché y lo que falte queda `PENDIENTE_TERMINAL`; `check` lo muestra como `[AVISO] xbbg instalado pero no carga`.
+
 Sin terminal, lo que una re-expresión necesitaría pedir a Bloomberg y no está en caché queda **`PENDIENTE_TERMINAL`** (Yield/Duration
 vacíos, cuentan como sin métrica en los agregados, motivo `SIN_CACHE_BBG` y columna `Pedido_BBG` con campo, ticker y overrides) y la
 versión queda `PARCIAL`; `reporteria pendientes [--fecha F]` las lista y `recalcular --fecha F --con-terminal` las cierra. La caché

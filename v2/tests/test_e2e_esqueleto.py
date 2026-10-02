@@ -96,3 +96,16 @@ def test_corrida_muestra(rutas, bbg, fx):
     ganadores = set(zip(ok["Pos_ID"], ok["Fuente"]))
     assert ganadores <= set(zip(cand["Pos_ID"], cand["Fuente"]))
     assert {"resumen", "cartera_final", "candidatos", "alertas"} <= set(pd.ExcelFile(res.excel).sheet_names)
+
+
+def test_correr_con_xbbg_roto_termina_con_alerta_y_pendientes(rutas, fx, xbbg_roto, tmp_path):
+    """La estación sin terminal (xbbg no carga) no tumba la corrida: alerta CRITICA, pendientes a terminal, nada 'sin dato'."""
+    from reporteria.adaptadores.bbg import CacheBloomberg, XbbgBloomberg
+    bbg = CacheBloomberg(XbbgBloomberg(), tmp_path / "cache_vacia", "20260731")
+    res = correr(rutas, Opciones(sin_sql=True, bbg=bbg, fx=fx))
+    al = res.alertas
+    conexion = al[al["Nombre"] == "BBG_SIN_CONEXION"]
+    assert len(conexion) == 1 and conexion.iloc[0]["Severidad"] == "CRITICA" and "ImportError" in conexion.iloc[0]["Detalle"]
+    assert (res.posiciones["Estado"] == "PENDIENTE_TERMINAL").any()
+    assert res.borrador is not None and res.borrador.exists()
+    assert not list((tmp_path / "cache_vacia").glob("bdp_*.csv"))        # sin terminal no se persiste ningún "sin dato"
