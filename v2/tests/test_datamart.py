@@ -33,6 +33,26 @@ def _borrador(tmp_path, nombre, fecha="20260731", ts="2026-08-01 10:00:00"):
                                                                         "hashes": {"codigo": "abc"}, "completitud": "COMPLETA"}, pos)
 
 
+def test_rename_atomico_reintenta_si_windows_lo_bloquea(tmp_path, monkeypatch):
+    """Windows (antivirus/indexador sobre archivos recién copiados) rechaza el rename con WinError 5 unos instantes: se reintenta;
+    si el bloqueo persiste, el error se propaga."""
+    from pathlib import Path
+    original, bloqueos = Path.rename, {"n": 2}
+
+    def rename_inestable(self, destino):
+        if self.name.endswith(".tmp") and bloqueos["n"] > 0:
+            bloqueos["n"] -= 1
+            raise PermissionError(5, "Access is denied")
+        return original(self, destino)
+    monkeypatch.setattr(Path, "rename", rename_inestable)
+    monkeypatch.setattr(DM, "ESPERA_RENAME", 0.0)
+    v = DMV.publicar(tmp_path / "datamart", "20260731", _borrador(tmp_path, "b1"))
+    assert v.numero == 1 and (v.ruta / "posiciones.parquet").exists() and bloqueos["n"] == 0
+    bloqueos["n"] = 10 ** 6
+    with pytest.raises(PermissionError):
+        DM.copiar_version(v.ruta, tmp_path / "otra" / "version=001")
+
+
 def test_publicar_numera_y_exige_reexpresar(tmp_path):
     raiz = tmp_path / "datamart"
     b1 = _borrador(tmp_path, "borrador_1")
@@ -44,7 +64,7 @@ def test_publicar_numera_y_exige_reexpresar(tmp_path):
         DMV.publicar(raiz, "20260731", _borrador(tmp_path, "borrador_2"), reexpresar=True)
     v2 = DMV.publicar(raiz, "20260731", _borrador(tmp_path, "borrador_2"), motivo="corrección Risk_Currency", reexpresar=True)
     assert (v2.numero, v2.estado) == (2, "REEXPRESADA")
-    hist = json.loads((raiz / "cierres" / "cierre=20260731" / "publicacion.json").read_text())
+    hist = json.loads((raiz / "cierres" / "cierre=20260731" / "publicacion.json").read_text(encoding="utf-8"))
     assert [h["version"] for h in hist] == [1, 2] and hist[1]["motivo"] == "corrección Risk_Currency"
     with pytest.raises(ValueError, match="cierre"):
         DMV.publicar(raiz, "20260831", _borrador(tmp_path, "borrador_3"))       # borrador de otro cierre
@@ -120,7 +140,7 @@ def test_correr_deja_borrador_publicar_reporte_y_anterior_desde_datamart(fixture
     corrida = DM.leer_corrida(b)
     assert corrida["estado"] == "BORRADOR" and corrida["hojas"] == list(res.hojas) and corrida["hashes"]["codigo"] and corrida["hashes"]["cubo"]
     assert corrida["anterior_version"] is None and corrida["completitud"] == "COMPLETA"
-    hashes = json.loads((b / "insumos" / "hashes.json").read_text())
+    hashes = json.loads((b / "insumos" / "hashes.json").read_text(encoding="utf-8"))
     assert {"REGLAS", "CUBO", "CACHE", "DIMENSIONALES"} <= set(hashes) and (b / "insumos" / "REGLAS.xlsx").exists()
     assert (b / "insumos" / "facturas_al_cierre.parquet").exists() and hashes["facturas_al_cierre"]["filas"] > 0
     pos_b = DM.leer_posiciones(b)

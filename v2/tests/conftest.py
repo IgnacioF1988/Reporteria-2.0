@@ -21,6 +21,21 @@ def construir_dim(fixtures: Path) -> Path:
     return DIM.escribir(destino, dims, csv_dir=fixtures / "csv")
 
 
+VARIABLES_ENTORNO = ("RUTA_CUBO_DIR", "RUTA_BIX", "BEE_SERVER", "BEE_DB", "BEE_UID", "BEE_PWD", "MONEDA_BI_PASSWORD", "MONEDA_BI_SSH_KEY",
+                     "FACTS_SSH_HOST", "FACTS_SSH_PORT", "FACTS_SSH_USER", "FACTS_DB", "FACTS_DB_USER", "FACTS_DB_PORT", "REPORTERIA_RAIZ",
+                     "REPORTERIA_DIM", "REPORTERIA_DATAMART", "REPORTERIA_CACHE", "REPORTERIA_MODO", "TEAMS_WEBHOOK_URL")
+
+
+@pytest.fixture(autouse=True)
+def entorno_aislado(monkeypatch):
+    """Los tests nunca leen el .env de la máquina (en la estación apunta a los shares reales del CUBO/BIX y trae la clave de Facts):
+    `load_dotenv` no hace nada y las variables del .env parten vacías; cada test fija con `setenv` lo que necesita."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
+    monkeypatch.setattr("reporteria.config.load_dotenv", lambda *a, **k: False)
+    for v in VARIABLES_ENTORNO:
+        monkeypatch.delenv(v, raising=False)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def dim_fixtures():
     """Toda carpeta de fixtures con BD_BalanceSheet.xlsx recibe su dimensionales.duckdb (mini, corporativo, casos_legacy…)."""

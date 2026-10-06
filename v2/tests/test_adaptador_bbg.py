@@ -225,6 +225,6 @@ def test_xbbg_instalado_pero_que_no_carga_degrada_a_terminal_caida(xbbg_roto, tm
 def test_xbbg_disponible_distingue_no_instalado(monkeypatch):
     import sys
     from reporteria.adaptadores.bbg import xbbg_disponible
-    monkeypatch.delitem(sys.modules, "xbbg", raising=False)
+    monkeypatch.setitem(sys.modules, "xbbg", None)        # `import xbbg` falla aunque la máquina lo tenga instalado
     monkeypatch.setattr("importlib.util.find_spec", lambda nombre: None)
     assert xbbg_disponible() == ("no_instalado", "")

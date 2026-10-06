@@ -3,7 +3,8 @@
 1. dim_clasificacion (dimensionales.duckdb, filas con comodines; ver `dim.resolver`) → Bucket, Ficha_FI y FX_Exposure.
    Sin fila que defina Bucket → SIN_REGLA + alerta. BalSheetKey se conserva solo como columna de auditoría.
 2. REGLAS/clasificacion pisa el bucket: criterio más específico gana (PK2/ID_Instrumento > BalSheetKey/Regex >
-   Issue_Type > Investment_Type); a igual criterio, regla por fondo gana a global; empate exacto → menor ID + alerta.
+   Issue_Type > Investment_Type); a igual criterio, regla por fondo gana a global; empate exacto → menor ID, y alerta
+   REGLA_AMBIGUA solo si las empatadas dan distinto Bucket/Tratamiento.
    (`Criterio=BalSheetKey` está deprecado: esas filas van a dim_clasificacion con ID_Fund.)
 3. REGLAS/buckets da el Tratamiento por bucket; bucket sin fila → CASCADA + alerta BUCKET_SIN_TRATAMIENTO.
 """
@@ -46,11 +47,15 @@ def clasificar(pos: pd.DataFrame, clasif: pd.DataFrame, buckets: pd.DataFrame, r
 
     n = len(pos)
     mejor, idx, ambiguo = np.full(n, -1.0), np.full(n, -1), np.zeros(n, dtype=bool)
+    if "ID" in reglas.columns:                              # a igual puntaje gana la primera recorrida: la de menor ID
+        reglas = reglas.sort_values("ID", key=lambda s: pd.to_numeric(s, errors="coerce"), kind="stable")
+    resultado = (reglas["Bucket"].astype(str) + "|" + reglas.get("Tratamiento", pd.Series("", index=reglas.index)).fillna("").astype(str)).to_dict()
     for i, r in reglas.iterrows():
         puntaje = ESPECIFICIDAD[r["Criterio"]] * 10 + (5 if pd.notna(r["ID_Fund"]) else 0)
         m = _match(pos, r).to_numpy()
         gana, empata = m & (puntaje > mejor), m & (puntaje == mejor)
-        ambiguo = (ambiguo | empata) & ~gana
+        distinto = np.array([resultado.get(j) != resultado[i] for j in idx]) if empata.any() else empata
+        ambiguo = (ambiguo | (empata & distinto)) & ~gana      # empate que da el mismo Bucket/Tratamiento no es ambiguo
         mejor[gana], idx[gana] = puntaje, i
     con_regla = idx >= 0
     elegida = reglas.reindex(idx[con_regla])

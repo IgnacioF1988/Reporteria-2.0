@@ -53,6 +53,12 @@ def test_migrar_manuales_fip_atributos_y_defaulteados(fixtures, tmp_path):
     assert len(rg.overrides_atributo) == 9 and rg.clasificacion["ID"].tolist() == list(range(1, len(rg.clasificacion) + 1))
 
 
+def test_llave_de_fusion_solo_quita_el_decimal_de_enteros():
+    from reporteria.legado import _txt_llave
+    assert _txt_llave(20.0) == "20" and _txt_llave(176142) == "176142" and _txt_llave(None) == "" and _txt_llave(float("nan")) == ""
+    assert _txt_llave("1.05") == "1.05" and _txt_llave(" ^bono.0x ") == "^BONO.0X"       # texto (regex, PK2) intacto
+
+
 def test_migrar_dimensionales_reproduce_balance_sheet_y_fx(fixtures):
     """Las filas compactadas dan exactamente lo mismo que BD_BalanceSheet / BD_FX_Exposure_* para cada llave y cada posición del CUBO."""
     import numpy as np

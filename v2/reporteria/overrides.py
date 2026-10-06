@@ -52,6 +52,10 @@ def aplicar_valores(pos: pd.DataFrame, ov: pd.DataFrame, settle: pd.Timestamp) -
             al.append(alertas.emitir("OVERRIDE_SIN_POSICION", "INFO", detalle=f"overrides_valor para {r['ID_Instrumento']}-{r['SubID_Instrumento']} fondo {r['ID_Fund']}: sin posición en el CUBO", ambito="CORRIDA"))
             continue
         dur = r["Duration"] if pd.notna(r["Duration"]) else None
+        sin_dur = m & pos["Duration"].isna() if dur is None else m & False
+        if sin_dur.any():                                   # solo yield y la posición no tenía duration: el DW la cuenta como 0
+            al.append(alertas.emitir("OVERRIDE_SIN_DURATION", "ALTA", pos[sin_dur], "overrides_valor sin Duration sobre una posición sin duration: "
+                                     "entra al DW con duration 0; complete Duration en REGLAS/overrides_valor", valor="TotalMVal"))
         for i in pos.index[m]:
             filas.append(candidato(pos.loc[i], "OVERRIDE", float(r["Yield"]), float(dur if dur is not None else pos.at[i, "Duration"]),
                                    moneda=str(r.get("Moneda", "") or pos.at[i, "Yield_Moneda"]), origen="REGLAS/overrides_valor",

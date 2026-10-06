@@ -76,6 +76,20 @@ def test_pk2_gana_a_balsheetkey_y_regex():
     assert (al["Nombre"] == "REGLA_AMBIGUA").sum() == 0          # el PK2 desempata
 
 
+def test_empate_gana_menor_id_aunque_la_hoja_venga_desordenada():
+    r = _reglas((7, None, "Nombre_Regex", "^BONO", "Equity", ""),
+                (3, None, "Nombre_Regex", "BONO$", "Cash, Mutual Funds & Others", ""))
+    out, al = clasificar(_pos(), DIM, BUCKETS, r)
+    assert out.iloc[0]["Bucket_Origen"] == "REGLA:3" and (al["Nombre"] == "REGLA_AMBIGUA").sum() == 1
+
+
+def test_empate_con_el_mismo_resultado_no_es_ambiguo():
+    r = _reglas((1, None, "Nombre_Regex", "^BONO", "Equity", ""),
+                (2, None, "Nombre_Regex", "BONO$", "Equity", ""))
+    out, al = clasificar(_pos(), DIM, BUCKETS, r)
+    assert out.iloc[0]["Bucket_Origen"] == "REGLA:1" and (al["Nombre"] == "REGLA_AMBIGUA").sum() == 0
+
+
 def test_sin_fila_y_bucket_sin_tratamiento_alertan():
     out, al = clasificar(_pos(Investment_Type_Code=9), DIM, BUCKETS, _reglas())
     assert out.iloc[0]["Bucket"] == "SIN_REGLA" and out.iloc[0]["Tratamiento"] == "CASCADA"

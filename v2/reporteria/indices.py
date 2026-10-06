@@ -49,7 +49,8 @@ def asignar_indice(pos: pd.DataFrame, bbg: Bloomberg | None, fecha: str) -> tupl
             if infl == "Y":
                 ind[i], origen[i] = INFLACION_PAIS.get(pais, f"INFLACION:{pais}"), "BBG"
                 if ind[i] not in INDICES:
-                    al.append(alertas.emitir("INDICE_SIN_CURVA", "ALTA", pos.loc[[i]], f"papel indexado a inflación de {pais} sin índice/curva en config.INDICES"))
+                    al.append(alertas.emitir("INDICE_INFLACION_DESCONOCIDA", "ALTA", pos.loc[[i]],
+                                             f"papel indexado a inflación de {pais} sin índice/curva en config.INDICES: queda con la yield real del papel"))
             elif cpn == "FLOATING" and reset:
                 if reset in RESET_IDX_A_INDICE:
                     ind[i], origen[i] = RESET_IDX_A_INDICE[reset], "BBG"

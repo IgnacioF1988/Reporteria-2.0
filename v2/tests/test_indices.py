@@ -33,6 +33,15 @@ def test_cascada_override_moneda_bbg_default(tmp_path):
     assert "US1 Corp" not in pedidos and "BR9 Corp" not in pedidos and "AR1 Corp" in pedidos
 
 
+def test_inflacion_de_pais_sin_indice_tiene_nombre_propio(tmp_path):
+    pd.DataFrame({"ticker": ["PY1 Corp"], "valor": ["Y"]}).to_csv(tmp_path / "bdp_INFLATION_LINKED_INDICATOR_20260731.csv", index=False)
+    pos = _pos(("a", "1-1", "PY1", "MXN", "PY", "", "RESUELTO", "BBG", ""))
+    out, al = asignar_indice(pos, FixtureBloomberg(tmp_path, "20260731"), "20260731")
+    assert out["Indice"].iloc[0] == "INFLACION:PY"
+    # ALTA y distinta de INDICE_SIN_CURVA (INFO en conversion: flotante sin curva, la yield ya es nominal)
+    assert set(al["Nombre"]) == {"INDICE_INFLACION_DESCONOCIDA"} and al["Severidad"].iloc[0] == "ALTA"
+
+
 def test_sin_bloomberg_queda_moneda_o_nominal():
     out, al = asignar_indice(_pos(("a", "1-38", "CL1", "CLF", "CL", "", "RESUELTO", "RA", ""), ("b", "2-11", "AR1", "ARS", "AR", "", "RESUELTO", "BBG", "")), None, "20260731")
     assert out["Indice"].tolist() == ["UF", "NOMINAL"] and al.empty

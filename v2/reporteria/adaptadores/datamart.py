@@ -19,6 +19,20 @@ CORRIDA = "corrida.json"
 PUBLICACION = "publicacion.json"
 INSUMOS = "insumos"
 _VACIA = "_vacia"
+INTENTOS_RENAME = 8          # Windows: el antivirus/indexador retiene unos instantes los archivos recién escritos (WinError 5)
+ESPERA_RENAME = 0.25         # segundos; espera creciente (0.25, 0.5, … ≈ 7 s en total) antes de dar el rename por fallido
+
+
+def _reintentar(accion):
+    """Ejecuta un rename/replace atómico reintentando ante PermissionError (bloqueo transitorio en Windows); si persiste, lo propaga."""
+    import time
+    for i in range(INTENTOS_RENAME):
+        try:
+            return accion()
+        except PermissionError:
+            if i == INTENTOS_RENAME - 1:
+                raise
+            time.sleep(ESPERA_RENAME * (i + 1))
 
 
 def _duckdb():
@@ -83,7 +97,7 @@ def escribir_version(dir_: Path, hojas: dict[str, pd.DataFrame], corrida: dict, 
     (tmp / CORRIDA).write_text(json.dumps(corrida, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     if dir_.exists():
         shutil.rmtree(dir_)
-    tmp.rename(dir_)
+    _reintentar(lambda: tmp.rename(dir_))
     return dir_
 
 
@@ -92,7 +106,7 @@ def _json_atomico(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    tmp.replace(path)
+    _reintentar(lambda: tmp.replace(path))
 
 
 def leer_corrida(dir_: Path) -> dict:
@@ -278,7 +292,7 @@ def copiar_version(origen: Path, destino: Path) -> Path:
     if tmp.exists():
         shutil.rmtree(tmp)
     shutil.copytree(origen, tmp)
-    tmp.rename(destino)
+    _reintentar(lambda: tmp.rename(destino))
     return destino
 
 

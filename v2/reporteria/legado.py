@@ -287,6 +287,15 @@ LLAVES = {"clasificacion": ["ID_Fund", "Criterio", "Valor"], "cajas": ["ID_Fund"
           "overrides_valor": ["ID_Fund", "ID_Instrumento", "SubID_Instrumento"], "overrides_atributo": ["ID_Fund", "ID_Instrumento", "SubID_Instrumento", "Field"]}
 
 
+def _txt_llave(x) -> str:
+    """Texto comparable de una celda de llave: 20.0 (entero leído como float) → "20"; el texto (PK2, regex "1.05") queda intacto."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return ""
+    if isinstance(x, float) and x.is_integer():
+        return str(int(x))
+    return str(x).strip().upper()
+
+
 def fusionar_reglas(reglas_path: Path, nuevas: dict[str, pd.DataFrame], salida: Path, fondos_validos: set[int] | None = None) -> dict[str, int]:
     """Agrega las filas nuevas a cada hoja de REGLAS sin duplicar por llave natural, renumera clasificacion.ID, valida y escribe."""
     from .lectura.reglas import leer_reglas
@@ -300,7 +309,7 @@ def fusionar_reglas(reglas_path: Path, nuevas: dict[str, pd.DataFrame], salida: 
             if c not in df.columns:
                 df[c] = None
         def _k(d):
-            return d[llave].apply(lambda r: "|".join(str(x).strip().upper().replace(".0", "") if pd.notna(x) else "" for x in r), axis=1)
+            return d[llave].apply(lambda r: "|".join(_txt_llave(x) for x in r), axis=1)
         existentes = set(_k(base)) if len(base) else set()
         df = df[~_k(df).isin(existentes)]
         agregadas[hoja] = len(df)

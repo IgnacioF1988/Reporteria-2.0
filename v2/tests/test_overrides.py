@@ -54,3 +54,5 @@ def test_overrides_valor_pisan_todo_y_dejan_rastro():
     assert o.loc["16|1-1|Asset", "Yield"] == 0.09 and pd.isna(o.loc["16|1-1|Asset", "Duration"]) and o.loc["16|1-1|Asset", "Estado"] == "RESUELTO"
     assert o.loc["20|1-39|Asset", "Yield"] == 0.05 and o.loc["20|1-39|Asset", "Fuente"] == "JPM"
     assert len(cand) == 2 and (cand["Fuente"] == "OVERRIDE").all() and (al["Nombre"] == "OVERRIDE_SIN_POSICION").sum() == 1
+    sin_dur = al[al["Nombre"] == "OVERRIDE_SIN_DURATION"]                 # solo yield sobre una posición sin duration: entra al DW como 0
+    assert len(sin_dur) == 1 and sin_dur["Pos_ID"].iloc[0] == "16|1-1|Asset" and sin_dur["Severidad"].iloc[0] == "ALTA"
